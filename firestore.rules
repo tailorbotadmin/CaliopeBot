@@ -1,0 +1,124 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ==========================================
+    // HELPER FUNCTIONS
+    // ==========================================
+    
+    function isSuperAdmin() {
+      return request.auth != null && request.auth.token.role == 'SuperAdmin';
+    }
+    
+    function belongsToOrg(orgId) {
+      return request.auth != null && request.auth.token.organizationId == orgId;
+    }
+
+    function hasRole(allowedRoles) {
+      return request.auth != null && request.auth.token.role in allowedRoles;
+    }
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // ==========================================
+    // USERS
+    // ==========================================
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isSuperAdmin() || 
+        belongsToOrg(resource.data.organizationId)
+      );
+      // Only SuperAdmin or backend can create/modify users
+      allow write: if isSuperAdmin();
+    }
+    
+    // ==========================================
+    // ORGANIZATIONS
+    // ==========================================
+    match /organizations/{orgId} {
+      allow read: if isSuperAdmin() || belongsToOrg(orgId);
+      allow create: if isSuperAdmin() && request.resource.data.keys().hasAll(['name']);
+      allow update: if isSuperAdmin();
+      allow delete: if isSuperAdmin();
+
+      // ---- BOOKS (nested under org) ----
+      match /books/{bookId} {
+        allow read: if isSuperAdmin() || belongsToOrg(orgId);
+        allow create: if (isSuperAdmin() || belongsToOrg(orgId)) &&
+          request.resource.data.keys().hasAll(['title', 'status']);
+        allow update: if isSuperAdmin() || (
+          belongsToOrg(orgId) && hasRole(['Admin', 'Responsable_Editorial', 'Editor'])
+        );
+        allow delete: if isSuperAdmin();
+
+        // ---- CHUNKS (nested under book) ----
+        match /chunks/{chunkId} {
+          allow read: if isSuperAdmin() || belongsToOrg(orgId);
+          allow write: if isSuperAdmin() || (
+            belongsToOrg(orgId) && hasRole(['Admin', 'Responsable_Editorial', 'Editor'])
+          );
+        }
+      }
+
+      // ---- PENDING RULES ----
+      match /pendingRules/{ruleId} {
+        allow read: if isSuperAdmin() || belongsToOrg(orgId);
+        allow create: if isSuperAdmin() || (
+          belongsToOrg(orgId) && hasRole(['Admin', 'Responsable_Editorial'])
+        );
+        allow update: if isSuperAdmin() || (
+          belongsToOrg(orgId) && hasRole(['Admin', 'Responsable_Editorial'])
+        );
+        allow delete: if isSuperAdmin();
+      }
+
+      // ---- APPROVED RULES ----
+      match /rules/{ruleId} {
+        allow read: if isSuperAdmin() || belongsToOrg(orgId);
+        allow write: if isSuperAdmin() || (
+          belongsToOrg(orgId) && hasRole(['Admin', 'Responsable_Editorial'])
+        );
+      }
+    }
+
+    // ==========================================
+    // TOP-LEVEL BOOKS (legacy, for backward compatibility)
+    // ==========================================
+    match /books/{bookId} {
+      allow read: if isSuperAdmin() || belongsToOrg(resource.data.organizationId);
+      allow create: if isSuperAdmin() || (
+        isAuthenticated() && belongsToOrg(request.resource.data.organizationId)
+      );
+      allow update: if isSuperAdmin() || (
+        belongsToOrg(resource.data.organizationId) && 
+        hasRole(['Admin', 'Responsable_Editorial', 'Editor'])
+      );
+      allow delete: if isSuperAdmin();
+    }
+    
+    // ==========================================
+    // TRAINING SAMPLES
+    // ==========================================
+    match /training_samples/{itemId} {
+      allow read: if isSuperAdmin() || belongsToOrg(resource.data.organizationId);
+      allow create: if isSuperAdmin() || (
+        isAuthenticated() && belongsToOrg(request.resource.data.organizationId)
+      );
+      allow update: if isSuperAdmin() || (
+        belongsToOrg(resource.data.organizationId) && 
+        hasRole(['Admin', 'Responsable_Editorial', 'Editor'])
+      );
+      allow delete: if isSuperAdmin();
+    }
+
+    // ==========================================
+    // DENY ALL OTHER ACCESS
+    // ==========================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

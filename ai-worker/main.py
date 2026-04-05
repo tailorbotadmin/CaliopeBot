@@ -1,21 +1,147 @@
+"""
+CalíopeBot AI Orchestrator
+Multi-agent editorial correction system with RAG, observability, and vector store.
+"""
+
 import io
-from docx import Document
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from pydantic import BaseModel
-from typing import List, Dict
+import os
+import json
 import uuid
+import logging
+from typing import List, Dict
+
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import language_tool_python
+from google import genai
+from google.genai import types
+from dotenv import load_dotenv
+import requests
 
-app = FastAPI(title="CalíopeBot AI Orchestrator")
+load_dotenv()
 
-# Inicializamos LanguageTool localmente para español
-tool = language_tool_python.LanguageTool('es')
+# ==========================================
+# CONFIGURATION
+# ==========================================
+from app.config import get_settings
+
+settings = get_settings()
+
+# ==========================================
+# LOGGING
+# ==========================================
+from app.services.logging_config import setup_logging, RequestTimingMiddleware
+
+setup_logging(
+    level=settings.LOG_LEVEL,
+    json_format=settings.is_production,
+)
+logger = logging.getLogger(__name__)
+
+# ==========================================
+# FIREBASE
+# ==========================================
+import firebase_admin
+from firebase_admin import credentials, firestore
+
+try:
+    firebase_admin.get_app()
+except ValueError:
+    if settings.FIREBASE_SERVICE_ACCOUNT_PATH and os.path.exists(settings.FIREBASE_SERVICE_ACCOUNT_PATH):
+        cred = credentials.Certificate(settings.FIREBASE_SERVICE_ACCOUNT_PATH)
+        firebase_admin.initialize_app(cred)
+    else:
+        firebase_admin.initialize_app()
+
+db = firestore.client()
+
+# ==========================================
+# VERTEX AI CLIENT
+# ==========================================
+try:
+    logger.info("Initializing Google AI Studio GenAI Client")
+    api_key = os.environ.get("GEMINI_API_KEY", "AIzaSyALreZ6PZlC3ogJQOLd51ntRSJ8Miwj5Hs")
+    client = genai.Client(api_key=api_key)
+except Exception as e:
+    logger.warning(f"GenAI init failed, using mocks: {e}")
+    client = None
+
+# ==========================================
+# VECTOR STORE (ChromaDB)
+# ==========================================
+from app.services.vector_store import EditorialVectorStore
+
+try:
+    vector_store = EditorialVectorStore(persist_dir=settings.CHROMA_PERSIST_DIR)
+    logger.info("ChromaDB vector store initialized")
+except Exception as e:
+    logger.warning(f"ChromaDB init failed: {e}")
+    vector_store = None
+
+# ==========================================
+# AI AGENTS
+# ==========================================
+from app.services.agents import GeneratorAgent, CriticAgent, ArbiterAgent
+
+generator = GeneratorAgent(client=client, model=settings.LLM_MODEL)
+critic = CriticAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL)
+arbiter = ArbiterAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL)
+
+# ==========================================
+# METRICS
+# ==========================================
+from app.services.metrics import (
+    metrics_endpoint, CORRECTIONS_PROCESSED, SUGGESTIONS_ACCEPTED,
+    SUGGESTIONS_REJECTED, ACTIVE_JOBS, VECTOR_QUERIES,
+)
+
+# ==========================================
+# LANGUAGETOOL
+# ==========================================
+import language_tool_python
+class MockTool:
+    def check(self, text):
+        return []
+
+try:
+    # Remote public API avoids local Java dependency
+    tool = language_tool_python.LanguageToolPublicAPI('es')
+except Exception as e:
+    logger.warning(f"Failed to initialize LanguageTool, using mock: {e}")
+    tool = MockTool()
+
+# ==========================================
+# FASTAPI APP
+# ==========================================
+app = FastAPI(
+    title="CalíopeBot AI Orchestrator",
+    version="2.0.0",
+    description="Multi-agent editorial correction system with RAG and observability",
+)
+
+# Middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.add_middleware(RequestTimingMiddleware)
+
+# Metrics endpoint
+app.add_route("/metrics", metrics_endpoint)
+
+# ==========================================
+# MODELS
+# ==========================================
 
 class CorrectionRequest(BaseModel):
     textId: str
-    text: str # Chunk of text (e.g., a paragraph)
-    tenantId: str # Organization ID for style RAG
-    authorId: str # Author ID for voice/style RAG
+    text: str
+    tenantId: str
+    authorId: str
 
 class SuggestionResponse(BaseModel):
     id: str
@@ -29,225 +155,431 @@ class CorrectionResponse(BaseModel):
     textId: str
     suggestions: List[SuggestionResponse]
 
-@app.get("/")
-def health_check():
-    return {"status": "ok", "service": "CalíopeBot AI Orchestrator (LLM Judge Pipeline)"}
+class IngestRequest(BaseModel):
+    bookId: str
+    organizationId: str
+    fileUrl: str
+    authorId: str
 
-@app.post("/api/v1/process-docx")
-async def process_docx(file: UploadFile = File(...)):
-    """
-    Recibe un archivo .docx, lo lee en memoria, y extrae los párrafos y estilos
-    para dividirlos en chunks listos para el pipeline IA.
-    """
-    if not file.filename.endswith('.docx'):
-        raise HTTPException(status_code=400, detail="El archivo debe ser un documento Word (.docx)")
-    
-    try:
-        content = await file.read()
-        doc = Document(io.BytesIO(content))
-        
-        chunks = []
-        for i, para in enumerate(doc.paragraphs):
-            text = para.text.strip()
-            if text:
-                chunks.append({
-                    "id": f"chunk-{i}",
-                    "text": text,
-                    "style": para.style.name if para.style else "Normal"
-                })
-        
-        return {
-            "message": f"Archivo {file.filename} parseado correctamente.", 
-            "total_chunks": len(chunks),
-            "preview": chunks[:3]
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error parseando docx: {str(e)}")
-
-def call_bsc_gpt2_base(text: str) -> str:
-    """
-    Agente 1: El Generador (Modelo BSC GPT-2).
-    Simula la llamada al modelo SFT entrenado con los 7 libros.
-    Solo hace traducción Párrafo Original -> Párrafo Corregido.
-    """
-    # TODO: Implementar llamada real a la API de inferencia del BSC
-    return text.replace("estaba", "se encontraba")  # Mock
-
-def call_critic_llm(original_text: str, gpt2_proposal: str, tenant_id: str, author_id: str) -> str:
-    """
-    Agente 2: El Crítico (Gemini Flash / Llama-3 Rápido).
-    Ataca la propuesta del GPT-2 usando el RAG Aislado del Tenant y del Autor.
-    """
-    # TODO: Consultar base de datos vectorial estricta por `tenant_id` Y `author_id`
-    # RAG_context_editorial = vector_search.query(original_text, tenant_id)
-    # RAG_context_author = vector_search.query(original_text, author_id)
-    
-    prompt = f"""
-    Eres un Crítico Editorial implacable.
-    TEXTO ORIGINAL: {original_text}
-    PROPUESTA GPT-2: {gpt2_proposal}
-    
-    Busca alucinaciones, cambios de voz del autor no justificados o violaciones de estilo.
-    Critica la propuesta de forma concisa.
-    """
-    # Mock de la respuesta del crítico
-    return "Crítica: El GPT-2 cambió 'estaba' por 'se encontraba', lo cual altera la voz del autor sin justificación ortográfica normativa."
-
-def call_arbiter_llm(original_text: str, gpt2_proposal: str, critique: str, tenant_id: str, author_id: str, lt_errors: list) -> List[Dict]:
-    """
-    Agente 3: El Árbitro (Modelo Superior, ej. GPT-4o o Gemini Pro).
-    Toma la decisión final basándose en el original, la propuesta, la crítica y los errores de LT.
-    Devuelve las sugerencias estructuradas en JSON.
-    """
-    # En producción este prompt estructura la salida y fuerza Markdown JSON
-    final_suggestions = []
-    
-    if "altera la voz del autor" not in critique:
-        final_suggestions.append({
-            "id": str(uuid.uuid4()),
-            "type": "Style",
-            "originalText": "estaba",
-            "correctedText": "se encontraba",
-            "justification": "Sugerencia de estilo base (Aprobada por el Árbitro).",
-            "riskLevel": "Medium"
-        })
-    else:
-        # El Árbitro hace caso al crítico y rechaza el cambio del GPT-2
-        pass
-        
-    return final_suggestions
-
-@app.post("/api/v1/process-text", response_model=CorrectionResponse)
-async def process_text(request: CorrectionRequest):
-    """
-    Endpoint principal para la corrección mediante Debate Multi-Agente.
-    """
-    # 1. Capa Objetiva (LanguageTool)
-    lt_matches = tool.check(request.text)
-    lt_errors = [{"rule": m.ruleId, "message": m.message, "replacements": m.replacements[:3]} for m in lt_matches]
-    
-    # 2. Agente 1 (Generador BSC)
-    gpt2_text = call_bsc_gpt2_base(request.text)
-    
-    # 3. Agente 2 (Crítico Dual RAG)
-    critique = call_critic_llm(request.text, gpt2_text, request.tenantId, request.authorId)
-    
-    # 4. Agente 3 (Árbitro)
-    final_suggestions = call_arbiter_llm(request.text, gpt2_text, critique, request.tenantId, request.authorId, lt_errors)
-    
-    # Agregamos las correcciones duras de LanguageTool si las hay
-    for error in lt_errors:
-        if error["replacements"]:
-            final_suggestions.append(
-                SuggestionResponse(
-                    id="lt_" + str(uuid.uuid4())[:8],
-                    originalText=error["context"] if "context" in error else request.text, # Simplified for Mock, need actual context from match
-                    correctedText=error["replacements"][0],
-                    justification=f"Regla {error['rule']}: {error['message']}",
-                    riskLevel="low",
-                    sourceRule=error["rule"]
-                )
-            )
-    
-    # 2. Consultar RAG (Firestore Vector o Pinecone)
-    style_guidelines = ["Regla CSIC: Las cursivas para extranjerismos."]
-    
-    # 3. Llamada al Modelo BSC GPT-2 (Generador Base)
-    bsc_generated_correction = f"{text} (Simulación de salida del BSC)"
-    
-    # 4. Llamada al Juez (Gemini / Claude Haiku / Llama3)
-    # Aquí construimos el prompt del Juez utilizando el contexto y el borrador de BSC
-    
-    juez_system_prompt = f"""
-    Eres un Juez de Corrección Editorial (CalíopeBot).
-    RECIBES:
-    1. Texto Original
-    2. Texto procesado por un modelo base (BSC GPT-2)
-    3. Guías de Estilo (RAG): {style_guidelines[0]}
-    
-    DEBES:
-    - Analizar las diferencias entre Original y BSC.
-    - Confirmar que se aplican los criterios RAE/Fundéu obligatorios.
-    - Descartar alucinaciones (cambios de voz del autor no necesarios).
-    - Asignar "Risk Level": low (ortografía/tipografía), medium (sintaxis), high (estilo/tono).
-    - Devolver un JSON con las sugerencias aprobadas y su justificación.
-    """
-    
-    juez_user_prompt = f"""
-    Original: {text}
-    BSC Draft: {bsc_generated_correction}
-    """
-    
-    # Simulación de la respuesta del LLM estructurada
-    # response = llm_client.generate_content(juez_system_prompt + juez_user_prompt)
-    # suggestions = parse_json(response.text)
-    
-    final_suggestions = lt_suggestions + [
-        SuggestionResponse(
-            id="llm_" + str(uuid.uuid4())[:8],
-            originalText="Ejemplo llm",
-            correctedText="Ejemplo Juez",
-            justification="Corrección de estilo según CSIC (Simulada).",
-            riskLevel="medium",
-            sourceRule="RAG: Guía Estilo"
-        )
-    ]
-    
-    return CorrectionResponse(
-        textId=str(uuid.uuid4()),
-        suggestions=final_suggestions
-    )
+class ExtractRulesRequest(BaseModel):
+    organizationId: str
+    originalFileUrl: str
+    correctedFileUrl: str
 
 class ExportRequest(BaseModel):
     originalText: str
     acceptedSuggestions: List[Dict]
 
-@app.post("/api/v1/export-docx")
-async def export_docx(request: ExportRequest):
-    """
-    Toma el texto original y las sugerencias aceptadas
-    y genera un documento .docx para descargar.
-    """
-    doc = Document()
-    doc.add_paragraph("CalíopeBot - Documento Corregido")
-    
-    # Simulación de aplicación de sugerencias (reemplazo simple)
-    # En producción requiere algoritmos de offset para no romper el formato.
-    final_text = request.originalText
-    for sug in request.acceptedSuggestions:
-        final_text = final_text.replace(sug.get("originalText", ""), sug.get("correctedText", ""))
-        
-    doc.add_paragraph(final_text)
-    
-    file_stream = io.BytesIO()
-    doc.save(file_stream)
-    file_stream.seek(0)
-    
-    # Retornarías esto como un FileResponse en FastAPI
-    return {"message": "Exportación docx exitosa, bytes generados", "size": len(file_stream.getvalue())}
-
 class LearnRequest(BaseModel):
     tenantId: str
     authorId: str
-    role: str # 'Editor', 'Responsable Editorial', or 'Autor'
+    role: str
     originalText: str
     correctedText: str
     justification: str
 
+class TrainStyleRequest(BaseModel):
+    organizationId: str
+    directory: str  # Path to directory with manuscript pairs
+
+class CreateUserRequest(BaseModel):
+    email: str
+    password: str
+    name: str
+    role: str
+    organizationId: str
+
+# ==========================================
+# ENDPOINTS
+# ==========================================
+
+@app.get("/")
+def health_check():
+    return {
+        "status": "ok",
+        "service": "CalíopeBot AI Orchestrator v2.0",
+        "environment": settings.ENVIRONMENT,
+        "vector_store": vector_store is not None,
+        "llm_client": client is not None,
+    }
+
+
+@app.post("/api/v1/process-text", response_model=CorrectionResponse)
+async def process_text(request: CorrectionRequest):
+    """Main correction endpoint: multi-agent debate pipeline."""
+    logger.info(f"Processing text {request.textId} for org={request.tenantId}")
+
+    # 1. LanguageTool (deterministic)
+    lt_matches = tool.check(request.text)
+    lt_errors = [
+        {
+            "rule": m.ruleId,
+            "message": m.message,
+            "replacements": m.replacements[:3],
+            "context": request.text[m.offset:m.offset + m.errorLength],
+        }
+        for m in lt_matches
+    ]
+
+    # 2. Generator Agent
+    gpt2_text = generator.run(request.text)
+
+    # 3. Critic Agent (with RAG)
+    critique = critic.run(request.text, gpt2_text, request.tenantId, request.authorId)
+
+    # 4. Arbiter Agent (with RAG)
+    final_suggestions_raw = arbiter.run(
+        request.text, gpt2_text, critique,
+        request.tenantId, request.authorId, lt_errors,
+    )
+
+    # Parse to SuggestionResponse
+    final_suggestions = [SuggestionResponse(**s) for s in final_suggestions_raw]
+
+    # Add LanguageTool suggestions
+    for error in lt_errors:
+        if error["replacements"]:
+            final_suggestions.append(SuggestionResponse(
+                id=f"lt_{uuid.uuid4().hex[:8]}",
+                originalText=error["context"],
+                correctedText=error["replacements"][0],
+                justification=f"Regla {error['rule']}: {error['message']}",
+                riskLevel="low",
+                sourceRule=error["rule"],
+            ))
+
+    CORRECTIONS_PROCESSED.inc()
+    return CorrectionResponse(textId=str(uuid.uuid4()), suggestions=final_suggestions)
+
+
+async def process_book_background(org_id: str, book_id: str, author_id: str):
+    """Background task: process book chunks through multi-agent pipeline."""
+    ACTIVE_JOBS.inc()
+    try:
+        logger.info(f"Background processing started: book={book_id}")
+        chunks_ref = (
+            db.collection("organizations").document(org_id)
+            .collection("books").document(book_id).collection("chunks")
+        )
+        chunks = chunks_ref.order_by("order").limit(settings.MAX_CHUNKS_PER_BATCH).stream()
+
+        batch = db.batch()
+        processed_count = 0
+
+        for chunk in chunks:
+            data = chunk.to_dict()
+            if data.get("status") != "pending":
+                continue
+
+            text = data["text"]
+
+            # 1. LanguageTool
+            lt_matches = tool.check(text)
+            lt_errors = [
+                {"rule": m.ruleId, "message": m.message,
+                 "replacements": m.replacements[:3],
+                 "context": text[m.offset:m.offset + m.errorLength]}
+                for m in lt_matches
+            ]
+
+            # 2-4. Agent pipeline
+            gpt2_text = generator.run(text)
+            critique = critic.run(text, gpt2_text, org_id, author_id)
+            suggestions = arbiter.run(text, gpt2_text, critique, org_id, author_id, lt_errors)
+
+            # Add LT suggestions
+            for error in lt_errors:
+                if error["replacements"]:
+                    suggestions.append({
+                        "id": f"lt_{uuid.uuid4().hex[:8]}",
+                        "originalText": error["context"],
+                        "correctedText": error["replacements"][0],
+                        "justification": f"Regla {error['rule']}: {error['message']}",
+                        "riskLevel": "low",
+                        "status": "pending",
+                        "sourceRule": error["rule"],
+                    })
+
+            for s in suggestions:
+                s.setdefault("status", "pending")
+
+            batch.update(chunks_ref.document(chunk.id), {
+                "status": "processed",
+                "suggestions": suggestions,
+            })
+            processed_count += 1
+
+        if processed_count > 0:
+            batch.commit()
+
+        # Update book status
+        book_ref = (
+            db.collection("organizations").document(org_id)
+            .collection("books").document(book_id)
+        )
+        book_ref.update({"status": "ready", "processedChunks": processed_count})
+        logger.info(f"Background done: book={book_id}, processed={processed_count}")
+
+    except Exception as e:
+        logger.error(f"Background task error: {e}", exc_info=True)
+    finally:
+        ACTIVE_JOBS.dec()
+
+
+@app.post("/api/v1/ingest-book")
+async def ingest_book(request: IngestRequest, background_tasks: BackgroundTasks):
+    """Parse DOCX manuscript and create chunks in Firestore."""
+    try:
+        from docx import Document
+
+        response = requests.get(request.fileUrl, timeout=60)
+        if response.status_code != 200:
+            raise HTTPException(status_code=400, detail="Failed to download file")
+
+        doc = Document(io.BytesIO(response.content))
+        chunks_ref = (
+            db.collection("organizations").document(request.organizationId)
+            .collection("books").document(request.bookId).collection("chunks")
+        )
+
+        # Batch with proper 500 limit handling
+        all_chunks = []
+        chunk_index = 0
+        for para in doc.paragraphs:
+            text = para.text.strip()
+            if text:
+                all_chunks.append({
+                    "id": f"chunk_{str(chunk_index).zfill(4)}",
+                    "text": text,
+                    "style": para.style.name if para.style else "Normal",
+                    "status": "pending",
+                    "order": chunk_index,
+                })
+                chunk_index += 1
+
+        # Commit in batches of 450 (safe margin under 500 limit)
+        for i in range(0, len(all_chunks), 450):
+            batch = db.batch()
+            for chunk_data in all_chunks[i:i + 450]:
+                doc_ref = chunks_ref.document(chunk_data["id"])
+                batch.set(doc_ref, chunk_data)
+            batch.commit()
+
+        # Update book status
+        book_ref = (
+            db.collection("organizations").document(request.organizationId)
+            .collection("books").document(request.bookId)
+        )
+        book_ref.update({
+            "status": "processing",
+            "totalChunks": len(all_chunks),
+            "processedChunks": 0,
+        })
+
+        background_tasks.add_task(
+            process_book_background, request.organizationId, request.bookId, request.authorId
+        )
+
+        logger.info(f"Ingested book {request.bookId}: {len(all_chunks)} chunks")
+        return {"status": "success", "total_chunks": len(all_chunks)}
+
+    except Exception as e:
+        logger.error(f"Ingest error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/extract-rules")
+async def extract_rules(request: ExtractRulesRequest):
+    """Extract editorial rules by comparing original vs corrected documents."""
+    try:
+        from docx import Document
+
+        resp_orig = requests.get(request.originalFileUrl, timeout=60)
+        resp_corr = requests.get(request.correctedFileUrl, timeout=60)
+
+        if resp_orig.status_code != 200 or resp_corr.status_code != 200:
+            raise HTTPException(status_code=400, detail="Failed to download files")
+
+        doc_orig = Document(io.BytesIO(resp_orig.content))
+        doc_corr = Document(io.BytesIO(resp_corr.content))
+
+        text_orig = "\n".join([p.text for p in doc_orig.paragraphs[:100] if p.text.strip()])
+        text_corr = "\n".join([p.text for p in doc_corr.paragraphs[:100] if p.text.strip()])
+
+        if not client:
+            rules = [{"id": f"p{uuid.uuid4().hex[:8]}", "rule": "Mock rule", "description": "No LLM.", "status": "pending"}]
+        else:
+            schema = {
+                "type": "ARRAY",
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "rule": {"type": "STRING"},
+                        "description": {"type": "STRING"},
+                    },
+                    "required": ["rule", "description"],
+                },
+            }
+            prompt = f"""Eres un Analista Editorial experto.
+Compara estos dos textos y DEDUCE las reglas editoriales sistemáticas que aplicó el corrector.
+Busca patrones consistentes. No devuelvas correcciones puntuales, sino REGLAS GENERALES.
+
+=== TEXTO ORIGINAL ===
+{text_orig}
+
+=== TEXTO CORREGIDO ===
+{text_corr}"""
+
+            response = client.models.generate_content(
+                model=settings.LLM_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=schema,
+                    temperature=0.2,
+                ),
+            )
+            deduced = json.loads(response.text)
+            rules = []
+            for r in deduced:
+                rules.append({
+                    "id": f"p{uuid.uuid4().hex[:8]}",
+                    "rule": r["rule"],
+                    "description": r["description"],
+                    "status": "pending",
+                    "createdAt": firestore.SERVER_TIMESTAMP,
+                })
+
+        # Store in Firestore + Vector DB
+        batch = db.batch()
+        org_ref = db.collection("organizations").document(request.organizationId)
+        for rule in rules:
+            rule_ref = org_ref.collection("pendingRules").document(rule["id"])
+            batch.set(rule_ref, rule)
+            if vector_store:
+                vector_store.add_editorial_rule(
+                    request.organizationId, rule["id"],
+                    f"{rule['rule']}: {rule['description']}",
+                )
+        batch.commit()
+
+        logger.info(f"Extracted {len(rules)} rules for org={request.organizationId}")
+        return {"status": "success", "extractedRules": rules}
+
+    except Exception as e:
+        logger.error(f"Extract rules error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/export-docx")
+async def export_docx(request: ExportRequest):
+    """Export corrected document as DOCX."""
+    from docx import Document
+
+    doc = Document()
+    doc.add_paragraph("CalíopeBot - Documento Corregido")
+
+    final_text = request.originalText
+    for sug in request.acceptedSuggestions:
+        final_text = final_text.replace(
+            sug.get("originalText", ""), sug.get("correctedText", "")
+        )
+    doc.add_paragraph(final_text)
+
+    file_stream = io.BytesIO()
+    doc.save(file_stream)
+    file_stream.seek(0)
+
+    return {"message": "Export successful", "size": len(file_stream.getvalue())}
+
+
 @app.post("/api/v1/learn-correction")
 async def learn_correction(request: LearnRequest):
-    """
-    Ruta de Self-Learning (Dual): 
-    Recibe una corrección aprobada manualmente por el Editor, Responsable o Autor.
-    La inyecta en el RAG Aislado (Editorial) y, si es relevante, en el RAG específico del Autor.
-    """
-    # TODO: Inyectar document en la Vector DB de la organización
-    # vector_db.insert(tenant_id=request.tenantId, ... )
+    """Self-learning: inject accepted correction into vector store for RAG."""
+    if vector_store:
+        vector_store.learn_from_correction(
+            org_id=request.tenantId,
+            author_id=request.authorId,
+            original=request.originalText,
+            corrected=request.correctedText,
+            justification=request.justification,
+        )
+        SUGGESTIONS_ACCEPTED.inc()
+        VECTOR_QUERIES.labels(collection_type="learn").inc()
+        logger.info(f"Learned correction for org={request.tenantId}, author={request.authorId}")
+    else:
+        logger.warning("Vector store not available, correction not persisted")
+
+    return {
+        "status": "success",
+        "message": f"Correction learned for author {request.authorId} by {request.role}",
+    }
+
+
+@app.post("/api/v1/train-style")
+async def train_style(request: TrainStyleRequest, background_tasks: BackgroundTasks):
+    """Batch process manuscript pairs to extract editorial style rules."""
+    from app.services.style_trainer import StyleTrainer
+
+    trainer = StyleTrainer(client=client, vector_store=vector_store)
+
+    async def _run():
+        total = trainer.batch_process_manuscripts(
+            request.directory, request.organizationId, db
+        )
+        logger.info(f"Style training complete: {total} rules extracted")
+
+    background_tasks.add_task(_run)
+    return {"status": "processing", "message": "Style training started in background"}
+
+
+@app.post("/api/v1/users/create")
+async def create_user_endpoint(request: CreateUserRequest, raw_req: Request):
+    """Admin endpoint to create a new user and set custom claims securely."""
+    auth_header = raw_req.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
     
-    # TODO: Inyectar preferencia de estilo particular en el espacio del autor
-    # vector_db.insert(author_id=request.authorId, text=f"Preferencia del autor: Usar '{request.correctedText}' en lugar de '{request.originalText}'.")
-    
-    return {"status": "success", "message": f"Regla inyectada y asociada al Autor {request.authorId} por el rol {request.role}."}
+    token = auth_header.split("Bearer ")[1]
+    try:
+        from firebase_admin import auth as firebase_auth
+        decoded_token = firebase_auth.verify_id_token(token)
+        
+        # Only Admins and SuperAdmins can create users
+        if decoded_token.get("role") not in ["Admin", "SuperAdmin"]:
+            raise HTTPException(status_code=403, detail="Forbidden, insufficient permissions")
+            
+        # Security: You can't create users outside your assigned org unless you are SuperAdmin
+        if decoded_token.get("role") != "SuperAdmin" and decoded_token.get("organizationId") != request.organizationId:
+            raise HTTPException(status_code=403, detail="Forbidden, cannot create users outside your organization")
+
+        user_record = firebase_auth.create_user(
+            email=request.email,
+            password=request.password,
+            display_name=request.name
+        )
+        
+        firebase_auth.set_custom_user_claims(user_record.uid, {
+            "role": request.role,
+            "organizationId": request.organizationId
+        })
+        
+        db.collection("users").document(user_record.uid).set({
+            "email": request.email,
+            "name": request.name,
+            "role": request.role,
+            "organizationId": request.organizationId,
+            "createdAt": firestore.SERVER_TIMESTAMP
+        })
+        
+        logger.info(f"User {request.email} created successfully with role {request.role}")
+        return {"status": "success", "uid": user_record.uid}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating user: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

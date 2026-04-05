@@ -1,0 +1,44 @@
+version: "3.9"
+
+services:
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - ANONYMIZED_TELEMETRY=false
+    networks:
+      - caliope
+
+  ai-worker:
+    build: ./ai-worker
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./ai-worker/.env
+    volumes:
+      - ./ai-worker:/app  # Live reload in dev
+    depends_on:
+      - chromadb
+    networks:
+      - caliope
+
+  web:
+    build: ./web
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./web/.env.local
+    depends_on:
+      - ai-worker
+    networks:
+      - caliope
+
+volumes:
+  chroma_data:
+
+networks:
+  caliope:
+    driver: bridge

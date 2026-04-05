@@ -81,3 +81,18 @@ ENV/
 
 # Env files
 .env.local
+
+# Service account keys (NEVER commit)
+service-account.json
+*-service-account.json
+
+# Large binary files (manuscripts, PDFs)
+*.docx
+*.pdf
+*.zip
+
+# ChromaDB data
+chroma_data/
+
+# Docker volumes
+data/

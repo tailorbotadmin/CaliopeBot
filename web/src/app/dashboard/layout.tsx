@@ -1,14 +1,26 @@
 "use client";
 
 import { useAuth } from "@/lib/auth-context";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import Link from "next/link";
+import {
+  LayoutDashboard,
+  FileCheck,
+  BookOpen,
+  GraduationCap,
+  BarChart3,
+  Building2,
+  Settings,
+  LogOut,
+} from "lucide-react";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, role, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (!loading && !user) {
@@ -18,8 +30,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   if (loading || !user) {
     return (
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}>
-        <p>Verificando sesión...</p>
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", backgroundColor: "var(--bg-color)" }}>
+        <p style={{ color: "var(--text-muted)" }}>Verificando sesión...</p>
       </div>
     );
   }
@@ -29,37 +41,78 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     router.push("/");
   };
 
+  const mainNav = [
+    { href: "/dashboard", label: "Panel", icon: LayoutDashboard, roles: null },
+    { href: "/dashboard/corrections", label: "Mis Correcciones", icon: FileCheck, roles: null },
+    { href: "/dashboard/books", label: "Mis Manuscritos", icon: BookOpen, roles: null },
+    { href: "/dashboard/training", label: "Entrenamiento", icon: GraduationCap, roles: ["SuperAdmin", "Admin", "Responsable Editorial"] },
+    { href: "/dashboard/reports", label: "Reportes", icon: BarChart3, roles: ["SuperAdmin", "Admin", "Responsable Editorial"] },
+  ];
+
+  const adminNav = [
+    { href: "/dashboard/organizations", label: "Organizaciones", icon: Building2, roles: ["SuperAdmin", "Admin"] },
+    { href: "/dashboard/criteria", label: "Criterios Editoriales", icon: BookOpen, roles: ["SuperAdmin", "Admin", "Responsable Editorial"] },
+    { href: "/dashboard/settings", label: "Configuración", icon: Settings, roles: ["SuperAdmin", "Admin"] },
+  ];
+
+  const isActive = (href: string) => {
+    if (href === "/dashboard") return pathname === "/dashboard";
+    return pathname.startsWith(href);
+  };
+
+  const renderNavItem = (item: typeof mainNav[0]) => {
+    if (item.roles && !item.roles.includes(role || "")) return null;
+    const Icon = item.icon;
+    const active = isActive(item.href);
+
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        className={`sidebar-link ${active ? "active" : ""}`}
+      >
+        <Icon size={18} strokeWidth={1.75} />
+        {item.label}
+      </Link>
+    );
+  };
+
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
-      {/* Sidebar */}
-      <aside style={{ width: "250px", backgroundColor: "var(--bg-surface)", borderRight: "1px solid var(--border-color)", display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: "1.5rem", borderBottom: "1px solid var(--border-color)", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-          <h2 style={{ fontSize: "1.25rem", fontWeight: 600, color: "var(--primary)" }}>CalíopeBot</h2>
-          <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            {role || "Cargando rol..."}
-          </span>
+      <aside className="sidebar">
+        {/* Brand */}
+        <div className="sidebar-brand">
+          <h2 style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <FileCheck size={22} strokeWidth={2} />
+            CalíopeBot
+          </h2>
+          <span className="role-tag">{role || "Cargando..."}</span>
         </div>
-        
-        <nav style={{ flex: 1, padding: "1rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-          <a href="/dashboard" className="btn btn-secondary" style={{ justifyContent: "flex-start" }}>Panel Principal</a>
+
+        {/* Main Nav */}
+        <nav>
+          <div className="nav-section-label">Principal</div>
+          {mainNav.map(renderNavItem)}
+
+          {/* Admin Section */}
           {(role === "SuperAdmin" || role === "Admin") && (
-            <a href="/dashboard/organizations" className="btn btn-secondary" style={{ justifyContent: "flex-start" }}>Organizaciones</a>
+            <>
+              <div className="nav-section-label" style={{ marginTop: "1rem" }}>Administración</div>
+              {adminNav.map(renderNavItem)}
+            </>
           )}
-          {(role === "SuperAdmin" || role === "Admin" || role === "Responsable Editorial") && (
-            <a href="/dashboard/books" className="btn btn-secondary" style={{ justifyContent: "flex-start" }}>Catálogo</a>
-          )}
-          <a href="/dashboard/editor" className="btn btn-secondary" style={{ justifyContent: "flex-start" }}>Editor</a>
         </nav>
 
-        <div style={{ padding: "1rem", borderTop: "1px solid var(--border-color)" }}>
-          <div style={{ fontSize: "0.875rem", marginBottom: "1rem", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {user.email}
-          </div>
-          <button onClick={handleLogout} className="btn btn-secondary" style={{ width: "100%" }}>Cerrar Sesión</button>
+        {/* Footer */}
+        <div className="sidebar-footer">
+          <div className="user-email">{user.email}</div>
+          <button onClick={handleLogout} className="btn-logout">
+            <LogOut size={14} strokeWidth={1.75} />
+            Cerrar Sesión
+          </button>
         </div>
       </aside>
 
-      {/* Main Content */}
       <main style={{ flex: 1, backgroundColor: "var(--bg-color)", overflowY: "auto" }}>
         {children}
       </main>

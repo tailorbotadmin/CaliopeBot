@@ -1,0 +1,16 @@
+.git
+.gitignore
+node_modules
+venv
+__pycache__
+.next
+.env
+.env.local
+*.pdf
+*.docx
+*.zip
+*.pyc
+.DS_Store
+chroma_data
+*.md
+service-account.json

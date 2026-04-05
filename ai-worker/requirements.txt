@@ -1,0 +1,36 @@
+# Core
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-dotenv
+
+# Document parsing
+python-docx
+pymupdf
+
+# NLP
+language_tool_python
+
+# Firebase
+firebase-admin
+
+# Google AI
+google-genai
+
+# Vector DB
+chromadb
+
+# Observability
+prometheus-client
+python-json-logger
+
+# Resilience
+tenacity
+requests
+
+# Testing
+pytest
+pytest-asyncio
+httpx
+ruff

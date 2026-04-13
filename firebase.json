@@ -1,16 +1,4 @@
 {
-  "hosting": {
-    "public": "web/public",
-    "rewrites": [
-      {
-        "source": "**",
-        "run": {
-          "serviceId": "caliopebot-web",
-          "region": "europe-west1"
-        }
-      }
-    ]
-  },
   "firestore": {
     "rules": "firestore.rules"
   },

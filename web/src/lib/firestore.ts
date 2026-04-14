@@ -40,8 +40,8 @@ export interface Book {
   createdAt: any;
 }
 
-export async function updateBookStatus(bookId: string, status: string) {
-  const bookRef = doc(db, 'books', bookId);
+export async function updateBookStatus(orgId: string, bookId: string, status: string) {
+  const bookRef = doc(db, 'organizations', orgId, 'books', bookId);
   await updateDoc(bookRef, { status });
 }
 
@@ -110,7 +110,7 @@ export async function getOrganizations(): Promise<Organization[]> {
 // ==========================================
 
 export async function createBook(orgId: string, authorId: string, title: string, fileUrl?: string, fileName?: string): Promise<string> {
-  const bookRef = await addDoc(collection(db, 'books'), {
+  const bookRef = await addDoc(collection(db, 'organizations', orgId, 'books'), {
     title,
     authorId,
     organizationId: orgId,
@@ -123,15 +123,17 @@ export async function createBook(orgId: string, authorId: string, title: string,
 }
 
 export async function getBooksByOrganization(orgId: string): Promise<Book[]> {
-  const q = query(collection(db, 'books'), where("organizationId", "==", orgId));
-  const snap = await getDocs(q);
-  return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Book));
+  const snap = await getDocs(collection(db, 'organizations', orgId, 'books'));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() } as Book));
 }
 
-export async function getBooksByAuthor(authorId: string): Promise<Book[]> {
-  const q = query(collection(db, 'books'), where("authorId", "==", authorId));
+export async function getBooksByAuthor(orgId: string, authorId: string): Promise<Book[]> {
+  const q = query(
+    collection(db, 'organizations', orgId, 'books'),
+    where('authorId', '==', authorId)
+  );
   const snap = await getDocs(q);
-  return snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Book));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() } as Book));
 }
 
 // ==========================================

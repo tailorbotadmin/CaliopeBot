@@ -58,6 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const saved = sessionStorage.getItem(IMPERSONATION_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (saved) setImpersonated(JSON.parse(saved));
     } catch {}
   }, []);

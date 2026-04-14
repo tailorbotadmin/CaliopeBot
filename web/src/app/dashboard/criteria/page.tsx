@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/lib/auth-context";
 import {
   Scale, CheckCircle2, XCircle, FilePlus2, Lightbulb,
-  BookOpen, Filter, CheckCheck, Tag,
+  BookOpen, CheckCheck,
 } from "lucide-react";
 import { collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";

@@ -57,9 +57,9 @@ export default function OrganizationsPage() {
       await fetchOrganizations();
       setIsModalOpen(false);
       setNewOrgName("");
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError("Error al crear. Asegúrate de tener permisos de SuperAdmin. " + err.message);
+      setError("Error al crear. Asegúrate de tener permisos de SuperAdmin. " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setIsSubmitting(false);
     }

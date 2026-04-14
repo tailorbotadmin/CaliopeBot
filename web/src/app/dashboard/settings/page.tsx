@@ -89,8 +89,8 @@ export default function SettingsPage() {
       // 2. Update local state (Firestore already updated by backend)
       setMembers(prev => prev.map(m => m.uid === uid ? { ...m, role: newRole } : m));
       setMessage({ type: "success", text: `Rol actualizado a ${newRole} correctamente.` });
-    } catch (err: any) {
-      setMessage({ type: "error", text: "Error al cambiar el rol: " + err.message });
+    } catch (err) {
+      setMessage({ type: "error", text: "Error al cambiar el rol: " + (err instanceof Error ? err.message : String(err)) });
     } finally {
       setUpdatingUid(null);
     }
@@ -116,8 +116,8 @@ export default function SettingsPage() {
       setFormData({ name: "", email: "", password: "", role: "Autor" });
       setShowForm(false);
       await fetchMembers();
-    } catch (err: any) {
-      setMessage({ type: "error", text: err.message });
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : String(err) });
     } finally {
       setCreating(false);
     }

@@ -161,9 +161,9 @@ export default function CriteriaPage() {
       setIsModalOpen(false);
       setOriginalFile(null);
       setCorrectedFile(null);
-    } catch (error: any) {
+    } catch (error) {
       console.error(error);
-      alert("Error deduciendo normas: " + error.message);
+      alert("Error deduciendo normas: " + (error instanceof Error ? error.message : String(error)));
     } finally {
       setIsExtracting(false);
     }

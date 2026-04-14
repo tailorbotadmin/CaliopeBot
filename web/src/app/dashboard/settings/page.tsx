@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { auth } from "@/lib/firebase";
-import { getOrgUsers, updateUserRole, UserProfile, Role } from "@/lib/firestore";
+import { getOrgUsers, UserProfile, Role } from "@/lib/firestore";
 import { UserPlus, Users, ChevronDown, Trash2, RefreshCw, Eye } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";

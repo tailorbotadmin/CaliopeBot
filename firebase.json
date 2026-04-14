@@ -6,7 +6,7 @@
     "rules": "storage.rules"
   },
   "hosting": {
-    "site": "caliopebot",
+    "site": "caliopebot-dad29",
     "public": "public",
     "ignore": [
       "firebase.json",

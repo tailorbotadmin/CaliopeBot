@@ -57,14 +57,17 @@ except ValueError:
 db = firestore.client()
 
 # ==========================================
-# VERTEX AI CLIENT
+# VERTEX AI CLIENT (ADC via service account — no API key needed)
 # ==========================================
 try:
-    logger.info("Initializing Google AI Studio GenAI Client")
-    api_key = os.environ.get("GEMINI_API_KEY", "AIzaSyALreZ6PZlC3ogJQOLd51ntRSJ8Miwj5Hs")
-    client = genai.Client(api_key=api_key)
+    logger.info("Initializing Gemini Client via Vertex AI (ADC)")
+    client = genai.Client(
+        vertexai=True,
+        project=settings.GCP_PROJECT_ID,
+        location=settings.GCP_LOCATION,
+    )
 except Exception as e:
-    logger.warning(f"GenAI init failed, using mocks: {e}")
+    logger.warning(f"Vertex AI GenAI init failed, using mocks: {e}")
     client = None
 
 # ==========================================
@@ -105,8 +108,9 @@ class MockTool:
         return []
 
 try:
-    # Remote public API avoids local Java dependency
-    tool = language_tool_python.LanguageToolPublicAPI('es')
+    # es-ES = español peninsular, normativa RAE
+    tool = language_tool_python.LanguageToolPublicAPI('es-ES')
+    logger.info("LanguageTool initialized: es-ES (RAE)")
 except Exception as e:
     logger.warning(f"Failed to initialize LanguageTool, using mock: {e}")
     tool = MockTool()
@@ -236,16 +240,16 @@ async def process_text(request: CorrectionRequest):
     # Parse to SuggestionResponse
     final_suggestions = [SuggestionResponse(**s) for s in final_suggestions_raw]
 
-    # Add LanguageTool suggestions
+    # Add LanguageTool suggestions (etiquetadas como RAE)
     for error in lt_errors:
         if error["replacements"]:
             final_suggestions.append(SuggestionResponse(
                 id=f"lt_{uuid.uuid4().hex[:8]}",
                 originalText=error["context"],
                 correctedText=error["replacements"][0],
-                justification=f"Regla {error['rule']}: {error['message']}",
+                justification=f"[RAE / LanguageTool] {error['message']} (Regla: {error['rule']})",
                 riskLevel="low",
-                sourceRule=error["rule"],
+                sourceRule=f"RAE:{error['rule']}",
             ))
 
     CORRECTIONS_PROCESSED.inc()
@@ -531,6 +535,58 @@ async def train_style(request: TrainStyleRequest, background_tasks: BackgroundTa
 
     background_tasks.add_task(_run)
     return {"status": "processing", "message": "Style training started in background"}
+
+
+class UpdateRoleRequest(BaseModel):
+    targetUid: str
+    role: str
+
+@app.post("/api/v1/users/update-role")
+async def update_user_role(request: UpdateRoleRequest, raw_req: Request):
+    """Update a user's role in Firebase Auth custom claims and Firestore."""
+    auth_header = raw_req.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
+
+    token = auth_header.split("Bearer ")[1]
+    try:
+        from firebase_admin import auth as firebase_auth
+        decoded_token = firebase_auth.verify_id_token(token)
+
+        caller_role = decoded_token.get("role", "")
+        if caller_role not in ["Admin", "SuperAdmin"]:
+            raise HTTPException(status_code=403, detail="Forbidden, insufficient permissions")
+
+        # Admins cannot promote to Admin or SuperAdmin
+        if caller_role == "Admin" and request.role in ["Admin", "SuperAdmin"]:
+            raise HTTPException(status_code=403, detail="Admins cannot assign Admin or SuperAdmin roles")
+
+        # Get target user's current org to prevent cross-org attacks
+        target_user = db.collection("users").document(request.targetUid).get()
+        if not target_user.exists:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        target_org = target_user.to_dict().get("organizationId")
+        caller_org = decoded_token.get("organizationId")
+        if caller_role != "SuperAdmin" and target_org != caller_org:
+            raise HTTPException(status_code=403, detail="Cannot edit users outside your organization")
+
+        # Update custom claims (immediate token propagation)
+        current_claims = firebase_auth.get_user(request.targetUid).custom_claims or {}
+        current_claims["role"] = request.role
+        firebase_auth.set_custom_user_claims(request.targetUid, current_claims)
+
+        # Update Firestore profile
+        db.collection("users").document(request.targetUid).update({"role": request.role})
+
+        logger.info(f"Role updated: uid={request.targetUid} -> role={request.role} by {decoded_token['uid']}")
+        return {"status": "success", "uid": request.targetUid, "role": request.role}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating role: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/v1/users/create")

@@ -20,13 +20,21 @@ type Suggestion = {
   sourceRule?: string;
 };
 
+type Chunk = {
+  id: string;
+  text: string;
+  order: number;
+  status: string;
+  suggestions?: Suggestion[];
+};
+
 export default function EditorPage() {
   const searchParams = useSearchParams();
   const bookId = searchParams.get("bookId");
   const { organizationId, user, role } = useAuth();
   const router = useRouter();
 
-  const [chunks, setChunks] = useState<any[]>([]);
+  const [chunks, setChunks] = useState<Chunk[]>([]);
   const [currentChunkIndex, setCurrentChunkIndex] = useState(0);
   const [bookStatus, setBookStatus] = useState<string>("processing");
   
@@ -49,7 +57,7 @@ export default function EditorPage() {
           orderBy("order", "asc")
         );
         const snap = await getDocs(q);
-        const fetchedChunks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const fetchedChunks = snap.docs.map(d => ({ id: d.id, ...d.data() } as Chunk));
         setChunks(fetchedChunks);
       } catch (err) {
         console.error("Error fetching chunks:", err);

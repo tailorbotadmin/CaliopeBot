@@ -8,11 +8,18 @@ import {
   query,
   where,
   getDocs,
-  serverTimestamp 
+  serverTimestamp,
+  Timestamp
 } from 'firebase/firestore';
+
 import { db } from './firebase';
 
 export type Role = 'SuperAdmin' | 'Admin' | 'Responsable_Editorial' | 'Editor' | 'Autor' | 'Traductor';
+
+// Firestore timestamps come back as Timestamp on read, but we write with serverTimestamp() (FieldValue).
+// We use Timestamp here for strict read typing; write operations are safe since setDoc/updateDoc accept both.
+type FirestoreDate = Timestamp;
+
 
 export interface UserProfile {
   uid: string;
@@ -20,24 +27,24 @@ export interface UserProfile {
   displayName?: string;
   role: Role;
   organizationId?: string; // Null if SuperAdmin
-  createdAt: any;
+  createdAt: FirestoreDate;
 }
 
 export interface Organization {
   id: string;
   name: string;
-  createdAt: any;
+  createdAt: FirestoreDate;
 }
 
 export interface Book {
   id: string;
   title: string;
-  authorId: string; // The specific author
+  authorId: string;
   organizationId: string;
   status: 'draft' | 'processing' | 'review_editor' | 'review_author' | 'review_responsable' | 'approved';
   fileUrl?: string;
   fileName?: string;
-  createdAt: any;
+  createdAt: FirestoreDate;
 }
 
 export async function updateBookStatus(orgId: string, bookId: string, status: string) {
@@ -148,7 +155,7 @@ export interface TrainingItem {
   status: "pending" | "approved" | "rejected";
   organizationId: string;
   bookId?: string;
-  createdAt?: any;
+  createdAt?: FirestoreDate;
 }
 
 export async function getTrainingItemsByOrganization(orgId: string): Promise<TrainingItem[]> {
@@ -175,8 +182,8 @@ export interface CorrectionRecord {
   editorName?: string;
   status: 'accepted' | 'rejected' | 'pending';
   sourceRule?: string;
-  createdAt: any;
-  reviewedAt?: any;
+  createdAt: FirestoreDate;
+  reviewedAt?: FirestoreDate;
 }
 
 export async function getOrgCorrections(orgId: string): Promise<CorrectionRecord[]> {

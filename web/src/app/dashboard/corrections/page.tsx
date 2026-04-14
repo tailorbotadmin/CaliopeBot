@@ -56,7 +56,7 @@ export default function CorrectionsPage() {
 
           chunksSnap.forEach(cSnap => {
             const suggestions = cSnap.data().suggestions || [];
-            suggestions.forEach((s: any) => {
+            suggestions.forEach((s: { status?: string }) => {
               total++;
               if (s.status === "pending" || !s.status) pending++;
               else if (s.status === "accepted" || s.status === "edited") accepted++;

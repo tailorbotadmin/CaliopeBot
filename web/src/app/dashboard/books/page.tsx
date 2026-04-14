@@ -3,10 +3,21 @@
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { getBooksByOrganization, getOrganizations, createBook, Book, Organization } from "@/lib/firestore";
-import { FolderOpen, FileText, UploadCloud, CheckCircle2 } from "lucide-react";
+import { FolderOpen, FileText, UploadCloud, CheckCircle2, Clock, Loader2 } from "lucide-react";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { storage } from "@/lib/firebase";
 import Link from "next/link";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
+  draft:               { label: "Borrador",           color: "var(--text-muted)",  bg: "var(--border-color)" },
+  processing:          { label: "Procesando",          color: "#f59e0b",            bg: "rgba(245,158,11,0.12)" },
+  review_editor:       { label: "Revisión Editor",     color: "#6366f1",            bg: "rgba(99,102,241,0.12)" },
+  review_author:       { label: "Revisión Autor",      color: "#06b6d4",            bg: "rgba(6,182,212,0.12)" },
+  review_responsable:  { label: "Aprobación Final",    color: "#a855f7",            bg: "rgba(168,85,247,0.12)" },
+  approved:            { label: "Aprobado",            color: "var(--success)",     bg: "rgba(16,185,129,0.12)" },
+};
 
 export default function BooksPage() {
   const { user, role, organizationId, loading } = useAuth();
@@ -121,22 +132,20 @@ export default function BooksPage() {
           // 3. Create Book in Firestore
           const bookId = await createBook(selectedOrgId, user!.uid, newTitle.trim(), downloadURL, selectedFile.name);
           
-          // 4. Trigger AI Worker Ingestion (Local Port 8000)
+          // 4. Trigger AI Worker Ingestion
           try {
-            await fetch('http://localhost:8000/api/v1/ingest-book', {
+            await fetch(`${API_URL}/api/v1/ingest-book`, {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                bookId: bookId,
+                bookId,
                 organizationId: selectedOrgId,
                 fileUrl: downloadURL,
                 authorId: user!.uid
               })
             });
           } catch (e) {
-            console.error("Warning: AI Worker unable to be reached. Make sure it's running on port 8000.");
+            console.warn("AI Worker no disponible. Asegúrate de que está corriendo.", e);
           }
 
           // 5. Refresh & Reset
@@ -199,28 +208,37 @@ export default function BooksPage() {
         </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "1.25rem" }}>
-          {books.map(book => (
-            <div key={book.id} className="card" style={{ padding: "1.5rem", display: "flex", flexDirection: "column" }}>
-              <div style={{ marginBottom: "1rem" }}>
-                <span className={`status-badge ${book.status === "draft" ? "status-pending" : "status-active"}`} style={{ marginBottom: "0.5rem" }}>
-                  {book.status.toUpperCase()}
-                </span>
-                <h3 style={{ fontSize: "1.0625rem", fontWeight: 700, color: "var(--text-main)", lineHeight: 1.3, marginTop: "0.5rem" }}>{book.title}</h3>
-                {book.fileName && (
-                   <p style={{ display: "flex", alignItems: "center", gap: "0.25rem", fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>
-                     <FileText size={12} /> {book.fileName}
-                   </p>
-                )}
-                <p style={{ fontSize: "0.65rem", color: "var(--text-muted)", marginTop: "0.375rem", fontFamily: "monospace" }}>ID: {book.id.slice(0, 8)}...</p>
+          {books.map(book => {
+            const sc = STATUS_CONFIG[book.status] ?? STATUS_CONFIG.draft;
+            const dateStr = book.createdAt?.toDate ? book.createdAt.toDate().toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+            return (
+              <div key={book.id} className="card" style={{ padding: "1.5rem", display: "flex", flexDirection: "column" }}>
+                <div style={{ marginBottom: "1rem" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.625rem" }}>
+                    <span style={{ fontSize: "0.7rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", padding: "0.2rem 0.6rem", borderRadius: "99px", backgroundColor: sc.bg, color: sc.color }}>
+                      {book.status === 'processing' && <Loader2 size={10} style={{ display: 'inline', marginRight: '0.25rem', animation: 'spin 1s linear infinite' }} />}
+                      {sc.label}
+                    </span>
+                    <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "0.25rem" }}>
+                      <Clock size={11} /> {dateStr}
+                    </span>
+                  </div>
+                  <h3 style={{ fontSize: "1.0625rem", fontWeight: 700, color: "var(--text-main)", lineHeight: 1.3 }}>{book.title}</h3>
+                  {book.fileName && (
+                    <p style={{ display: "flex", alignItems: "center", gap: "0.25rem", fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.4rem" }}>
+                      <FileText size={12} /> {book.fileName}
+                    </p>
+                  )}
+                </div>
+
+                <div style={{ marginTop: "auto", paddingTop: "0.875rem", borderTop: "1px solid var(--border-color)" }}>
+                  <Link href={`/dashboard/editor?bookId=${book.id}`} className="btn" style={{ textDecoration: "none", width: "100%", fontSize: "0.8125rem", display: "block", textAlign: "center" }}>
+                    Abrir Editor →
+                  </Link>
+                </div>
               </div>
-              
-              <div style={{ marginTop: "auto", paddingTop: "0.875rem", borderTop: "1px solid var(--border-color)" }}>
-                <Link href={`/dashboard/editor?bookId=${book.id}`} className="btn" style={{ textDecoration: "none", width: "100%", fontSize: "0.8125rem" }}>
-                  Abrir Editor →
-                </Link>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

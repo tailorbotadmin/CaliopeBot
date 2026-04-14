@@ -15,10 +15,21 @@ import {
   Building2,
   Settings,
   LogOut,
+  Eye,
+  X,
 } from "lucide-react";
 
+const ROLE_LABELS: Record<string, string> = {
+  SuperAdmin: "SuperAdmin",
+  Admin: "Admin",
+  Responsable_Editorial: "Resp. Editorial",
+  Editor: "Editor",
+  Traductor: "Traductor",
+  Autor: "Autor",
+};
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { user, role, loading } = useAuth();
+  const { user, role, realRole, loading, impersonated, stopImpersonation } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -37,6 +48,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   const handleLogout = () => {
+    stopImpersonation();
     signOut(auth);
     router.push("/");
   };
@@ -45,13 +57,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { href: "/dashboard", label: "Panel", icon: LayoutDashboard, roles: null },
     { href: "/dashboard/corrections", label: "Mis Correcciones", icon: FileCheck, roles: null },
     { href: "/dashboard/books", label: "Mis Manuscritos", icon: BookOpen, roles: null },
-    { href: "/dashboard/training", label: "Entrenamiento", icon: GraduationCap, roles: ["SuperAdmin", "Admin", "Responsable Editorial"] },
-    { href: "/dashboard/reports", label: "Reportes", icon: BarChart3, roles: ["SuperAdmin", "Admin", "Responsable Editorial"] },
+    { href: "/dashboard/training", label: "Entrenamiento", icon: GraduationCap, roles: ["SuperAdmin", "Admin", "Responsable_Editorial", "Responsable Editorial"] },
+    { href: "/dashboard/reports", label: "Reportes", icon: BarChart3, roles: ["SuperAdmin", "Admin", "Responsable_Editorial", "Responsable Editorial"] },
   ];
 
   const adminNav = [
     { href: "/dashboard/organizations", label: "Organizaciones", icon: Building2, roles: ["SuperAdmin", "Admin"] },
-    { href: "/dashboard/criteria", label: "Criterios Editoriales", icon: BookOpen, roles: ["SuperAdmin", "Admin", "Responsable Editorial"] },
+    { href: "/dashboard/criteria", label: "Criterios Editoriales", icon: BookOpen, roles: ["SuperAdmin", "Admin", "Responsable_Editorial", "Responsable Editorial"] },
     { href: "/dashboard/settings", label: "Configuración", icon: Settings, roles: ["SuperAdmin", "Admin"] },
   ];
 
@@ -60,62 +72,115 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return pathname.startsWith(href);
   };
 
+  // When impersonating, show the impersonated role's nav. SuperAdmin's own nav is always shown when not impersonating.
+  const effectiveRole = role;
+
   const renderNavItem = (item: typeof mainNav[0]) => {
-    if (item.roles && !item.roles.includes(role || "")) return null;
+    if (item.roles && !item.roles.includes(effectiveRole || "")) return null;
     const Icon = item.icon;
     const active = isActive(item.href);
 
     return (
-      <Link
-        key={item.href}
-        href={item.href}
-        className={`sidebar-link ${active ? "active" : ""}`}
-      >
+      <Link key={item.href} href={item.href} className={`sidebar-link ${active ? "active" : ""}`}>
         <Icon size={18} strokeWidth={1.75} />
         {item.label}
       </Link>
     );
   };
 
+  const showAdminNav = effectiveRole === "SuperAdmin" || effectiveRole === "Admin";
+
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
-      <aside className="sidebar">
-        {/* Brand */}
-        <div className="sidebar-brand">
-          <h2 style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <FileCheck size={22} strokeWidth={2} />
-            CalíopeBot
-          </h2>
-          <span className="role-tag">{role || "Cargando..."}</span>
-        </div>
+    <div style={{ display: "flex", minHeight: "100vh", flexDirection: "column" }}>
 
-        {/* Main Nav */}
-        <nav>
-          <div className="nav-section-label">Principal</div>
-          {mainNav.map(renderNavItem)}
-
-          {/* Admin Section */}
-          {(role === "SuperAdmin" || role === "Admin") && (
-            <>
-              <div className="nav-section-label" style={{ marginTop: "1rem" }}>Administración</div>
-              {adminNav.map(renderNavItem)}
-            </>
-          )}
-        </nav>
-
-        {/* Footer */}
-        <div className="sidebar-footer">
-          <div className="user-email">{user.email}</div>
-          <button onClick={handleLogout} className="btn-logout">
-            <LogOut size={14} strokeWidth={1.75} />
-            Cerrar Sesión
+      {/* ── IMPERSONATION BANNER ── */}
+      {impersonated && (
+        <div style={{
+          position: "sticky", top: 0, zIndex: 1000,
+          backgroundColor: "#f59e0b", color: "#1c1a12",
+          padding: "0.625rem 1.5rem",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          fontSize: "0.8125rem", fontWeight: 600, gap: "1rem",
+          boxShadow: "0 2px 8px rgba(245,158,11,0.4)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
+            <Eye size={16} style={{ flexShrink: 0 }} />
+            <span>
+              Viendo como{" "}
+              <strong>{impersonated.displayName ?? impersonated.email}</strong>
+              {" "}—{" "}
+              <span style={{ opacity: 0.85 }}>{ROLE_LABELS[impersonated.role] ?? impersonated.role}</span>
+            </span>
+          </div>
+          <button
+            onClick={stopImpersonation}
+            style={{
+              display: "flex", alignItems: "center", gap: "0.375rem",
+              background: "rgba(0,0,0,0.15)", border: "none", borderRadius: "var(--radius-md)",
+              padding: "0.3rem 0.75rem", cursor: "pointer", fontWeight: 700,
+              color: "#1c1a12", fontSize: "0.8125rem",
+            }}
+          >
+            <X size={13} /> Salir de la vista
           </button>
         </div>
-      </aside>
+      )}
 
-      <main style={{ flex: 1, backgroundColor: "var(--bg-color)", overflowY: "auto" }}>
-        {children}
-      </main>
+      <div style={{ display: "flex", flex: 1 }}>
+        {/* ── SIDEBAR ── */}
+        <aside className="sidebar">
+          {/* Brand */}
+          <div className="sidebar-brand">
+            <h2 style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <FileCheck size={22} strokeWidth={2} />
+              CalíopeBot
+            </h2>
+            <span className="role-tag" style={impersonated ? { backgroundColor: "rgba(245,158,11,0.18)", color: "#f59e0b" } : {}}>
+              {ROLE_LABELS[effectiveRole ?? ""] ?? effectiveRole ?? "Cargando..."}
+            </span>
+          </div>
+
+          {/* Main Nav */}
+          <nav>
+            <div className="nav-section-label">Principal</div>
+            {mainNav.map(renderNavItem)}
+
+            {showAdminNav && (
+              <>
+                <div className="nav-section-label" style={{ marginTop: "1rem" }}>Administración</div>
+                {adminNav.map(renderNavItem)}
+              </>
+            )}
+          </nav>
+
+          {/* Footer */}
+          <div className="sidebar-footer">
+            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem" }}>
+              {impersonated ? (
+                <span style={{ color: "#f59e0b", fontWeight: 600 }}>
+                  👁 Tú: {user.email}
+                </span>
+              ) : (
+                user.email
+              )}
+            </div>
+            {impersonated && (
+              <div className="user-email" style={{ marginBottom: "0.5rem" }}>
+                {impersonated.email}
+              </div>
+            )}
+            <button onClick={handleLogout} className="btn-logout">
+              <LogOut size={14} strokeWidth={1.75} />
+              Cerrar Sesión
+            </button>
+          </div>
+        </aside>
+
+        {/* ── MAIN CONTENT ── */}
+        <main style={{ flex: 1, backgroundColor: "var(--bg-color)", overflowY: "auto" }}>
+          {children}
+        </main>
+      </div>
     </div>
   );
 }

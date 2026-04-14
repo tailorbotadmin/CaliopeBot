@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { getBooksByOrganization, getOrganizations, createBook, Book, Organization } from "@/lib/firestore";
 import { FolderOpen, FileText, UploadCloud, CheckCircle2, Clock, Loader2 } from "lucide-react";
@@ -35,13 +35,7 @@ export default function BooksPage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (!loading && user) {
-      fetchData();
-    }
-  }, [loading, user]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
       if (role === "SuperAdmin") {
@@ -62,7 +56,13 @@ export default function BooksPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [role, organizationId]);
+
+  useEffect(() => {
+    if (!loading && user) {
+      fetchData();
+    }
+  }, [loading, user, fetchData]);
 
   const handleOrgChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const orgId = e.target.value;

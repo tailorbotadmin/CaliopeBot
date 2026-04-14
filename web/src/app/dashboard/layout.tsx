@@ -29,7 +29,7 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { user, role, realRole, loading, impersonated, stopImpersonation } = useAuth();
+  const { user, role, loading, impersonated, stopImpersonation } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 

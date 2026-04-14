@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { GraduationCap, CheckCircle2, XCircle, Eye, FolderOpen } from "lucide-react";
+import { CheckCircle2, XCircle, Eye, FolderOpen } from "lucide-react";
 import { getTrainingItemsByOrganization, updateTrainingItemStatus, TrainingItem, getOrganizations, Organization } from "@/lib/firestore";
 
 export default function TrainingPage() {
@@ -13,13 +13,7 @@ export default function TrainingPage() {
   const [selectedOrgId, setSelectedOrgId] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    if (!loading && user) {
-      fetchData();
-    }
-  }, [loading, user]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
       if (role === "SuperAdmin") {
@@ -40,7 +34,13 @@ export default function TrainingPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [role, organizationId]);
+
+  useEffect(() => {
+    if (!loading && user) {
+      fetchData();
+    }
+  }, [loading, user, fetchData]);
 
   const handleOrgChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const orgId = e.target.value;

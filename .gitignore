@@ -64,6 +64,9 @@ eggs/
 .eggs/
 lib/
 lib64/
+# Excepción: la carpeta lib del frontend Next.js sí debe commitearse
+!web/src/lib/
+!web/src/lib/**
 parts/
 sdist/
 var/

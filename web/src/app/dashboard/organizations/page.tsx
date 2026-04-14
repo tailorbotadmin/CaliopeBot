@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { Building2 } from "lucide-react";
 import { getOrganizations, createOrganization, Organization } from "@/lib/firestore";
 import { useRouter } from "next/navigation";
 

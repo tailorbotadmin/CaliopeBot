@@ -4,5 +4,23 @@
   },
   "storage": {
     "rules": "storage.rules"
+  },
+  "hosting": {
+    "site": "caliopebot",
+    "public": "public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/**",
+        "run": {
+          "serviceId": "caliopebot-web",
+          "region": "europe-west1"
+        }
+      }
+    ]
   }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { collection, query, orderBy, getDocs, doc, setDoc, getDoc } from "firebase/firestore";
@@ -38,10 +38,23 @@ export default function EditorPage() {
   const [currentChunkIndex, setCurrentChunkIndex] = useState(0);
   const [bookStatus, setBookStatus] = useState<string>("processing");
   
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState<string | null>(null);
   const [editingSuggestion, setEditingSuggestion] = useState<string | null>(null);
   const [customEdit, setCustomEdit] = useState("");
+
+  // Derive suggestions from the current chunk — no need for setState
+  const suggestions: Suggestion[] = useMemo(() => {
+    if (chunks.length === 0) return [];
+    return (chunks[currentChunkIndex]?.suggestions ?? []) as Suggestion[];
+  }, [chunks, currentChunkIndex]);
+
+  const setSuggestions = (newSuggestions: Suggestion[]) => {
+    const newChunks = [...chunks];
+    if (newChunks[currentChunkIndex]) {
+      newChunks[currentChunkIndex] = { ...newChunks[currentChunkIndex], suggestions: newSuggestions };
+      setChunks(newChunks);
+    }
+  };
 
   useEffect(() => {
     if (!organizationId || !bookId) return;
@@ -65,17 +78,6 @@ export default function EditorPage() {
     };
     fetchChunks();
   }, [organizationId, bookId]);
-
-  useEffect(() => {
-    if (chunks.length > 0) {
-      const currentChunk = chunks[currentChunkIndex];
-      if (currentChunk.suggestions) {
-        setSuggestions(currentChunk.suggestions as Suggestion[]);
-      } else {
-        setSuggestions([]);
-      }
-    }
-  }, [chunks, currentChunkIndex]);
 
       const handleNextPhase = async () => {
           if (!bookId || !organizationId) return;
@@ -165,11 +167,6 @@ export default function EditorPage() {
             ...currentChunk,
             suggestions: newSuggestions
           }, { merge: true });
-          
-          const newChunks = [...chunks];
-          newChunks[currentChunkIndex].suggestions = newSuggestions;
-          setChunks(newChunks);
-          
         } catch (e) { console.error("Error saving chunk:", e); }
       };
     

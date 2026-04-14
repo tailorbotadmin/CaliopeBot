@@ -70,15 +70,14 @@ export default function EditorPage() {
   }, [chunks, currentChunkIndex]);
 
       const handleNextPhase = async () => {
-          if (!bookId) return;
+          if (!bookId || !organizationId) return;
           let nextStatus = "review_author";
           if (role === "Editor") nextStatus = "review_author";
           else if (role === "Autor" || role === "Traductor") nextStatus = "review_responsable";
           else if (role === "Responsable_Editorial" || role === "Admin" || role === "SuperAdmin") nextStatus = "approved";
           
           try {
-              await updateBookStatus(bookId, nextStatus);
-              alert(`Documento avanzado a estado: ${nextStatus}`);
+              await updateBookStatus(organizationId, bookId, nextStatus);
               router.push("/dashboard/books");
           } catch (e) {
               console.error("Error avanzando fase", e);
@@ -124,7 +123,8 @@ export default function EditorPage() {
             const acceptedSug = newSuggestions.find(s => s.id === id);
             if (acceptedSug) {
                 try {
-                   await fetch("http://localhost:8000/api/v1/learn-correction", {
+                   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+                   await fetch(`${apiUrl}/api/v1/learn-correction`, {
                      method: "POST",
                      headers: { "Content-Type": "application/json" },
                      body: JSON.stringify({

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { FileCheck, ChevronRight, Clock, CheckCircle2, XCircle } from "lucide-react";
-import { collection, query, where, getDocs } from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
 
@@ -32,21 +32,22 @@ export default function CorrectionsPage() {
     if (!organizationId || !user) return;
     const fetchCorrections = async () => {
       try {
-        let q;
-        if (role === "Autor") {
-          q = query(collection(db, "books"), where("authorId", "==", user.uid));
-        } else {
-          // Editores y Responsables ven todo lo de su org
-          q = query(collection(db, "books"), where("organizationId", "==", organizationId));
-        }
-        
-        const booksSnap = await getDocs(q);
+        // Obtener libros desde la subcolección correcta
+        const booksSnap = await getDocs(
+          collection(db, "organizations", organizationId, "books")
+        );
         const fetchedCorrections: Correction[] = [];
 
         for (const docSnap of booksSnap.docs) {
           const book = docSnap.data();
-          // Fetch chunks to aggregate suggestions
-          const chunksSnap = await getDocs(collection(db, "organizations", organizationId, "books", docSnap.id, "chunks"));
+
+          // Filtrar por autor si el rol es Autor
+          if (role === "Autor" && book.authorId !== user.uid) continue;
+
+          // Fetch chunks desde la subcolección anidada
+          const chunksSnap = await getDocs(
+            collection(db, "organizations", organizationId, "books", docSnap.id, "chunks")
+          );
           
           let pending = 0;
           let accepted = 0;
@@ -63,10 +64,10 @@ export default function CorrectionsPage() {
             });
           });
 
-          // Skip if no suggestions and not in processing state
+          // Skip libros sin sugerencias y fuera del estado de procesamiento
           if (total === 0 && book.status !== "processing") continue;
 
-          let status: CorrectionStatus = pending > 0 ? "pending" : (accepted > 0 ? "accepted" : "rejected");
+          const status: CorrectionStatus = pending > 0 ? "pending" : (accepted > 0 ? "accepted" : "rejected");
           
           fetchedCorrections.push({
             id: docSnap.id,

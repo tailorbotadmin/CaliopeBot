@@ -4,11 +4,16 @@ import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/lib/auth-context";
 import {
   Scale, CheckCircle2, XCircle, FilePlus2, Lightbulb,
-  BookOpen, CheckCheck,
+  BookOpen, CheckCheck, PenLine, Trash2, Plus, Download, X,
 } from "lucide-react";
-import { collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch } from "firebase/firestore";
+import {
+  collection, onSnapshot, doc, setDoc, deleteDoc,
+  writeBatch, updateDoc,
+} from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
+import { Document, Packer, Paragraph, TextRun, HeadingLevel } from "docx";
+import { saveAs } from "file-saver";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -31,6 +36,8 @@ const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
   typography: { label: "Tipografía",  color: "#06b6d4" },
 };
 
+const CATEGORIES_LIST = ["style", "grammar", "format", "typography"] as const;
+
 function CategoryBadge({ category }: { category?: string }) {
   const cat = CATEGORY_LABELS[category ?? ""] ?? { label: category ?? "General", color: "var(--text-muted)" };
   return (
@@ -45,18 +52,34 @@ function CategoryBadge({ category }: { category?: string }) {
   );
 }
 
+type RuleFormData = { name: string; description: string; category: string };
+const EMPTY_FORM: RuleFormData = { name: "", description: "", category: "style" };
+
 export default function CriteriaPage() {
   const { role, organizationId } = useAuth();
   const [activeRules, setActiveRules] = useState<Criterion[]>([]);
   const [pendingRules, setPendingRules] = useState<Criterion[]>([]);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Filters
+  const [pendingFilter, setPendingFilter] = useState<Category>("all");
+  const [activeFilter, setActiveFilter] = useState<Category>("all");
+  const [approvingAll, setApprovingAll] = useState(false);
+
+  // Extraction modal
+  const [isExtractModalOpen, setIsExtractModalOpen] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [originalFile, setOriginalFile] = useState<File | null>(null);
   const [correctedFile, setCorrectedFile] = useState<File | null>(null);
 
-  const [pendingFilter, setPendingFilter] = useState<Category>("all");
-  const [activeFilter, setActiveFilter] = useState<Category>("all");
-  const [approvingAll, setApprovingAll] = useState(false);
+  // Manual rule modal (create / edit)
+  const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
+  const [editingRule, setEditingRule] = useState<Criterion | null>(null); // null = create mode
+  const [ruleForm, setRuleForm] = useState<RuleFormData>(EMPTY_FORM);
+  const [isSavingRule, setIsSavingRule] = useState(false);
+  const [ruleError, setRuleError] = useState("");
+
+  // Export
+  const [isExporting, setIsExporting] = useState(false);
 
   const canManage = role === "SuperAdmin" || role === "Admin" || role === "Responsable_Editorial";
 
@@ -88,6 +111,7 @@ export default function CriteriaPage() {
 
   const getRuleName = (rule: Criterion) => rule.name ?? rule.rule ?? "Regla sin nombre";
 
+  // ---- Approve pending rule ----
   const handleAction = async (rule: Criterion, action: "approved" | "rejected") => {
     if (!organizationId) return;
     try {
@@ -114,8 +138,7 @@ export default function CriteriaPage() {
     try {
       const batch = writeBatch(db);
       for (const rule of filteredPending) {
-        const ruleRef = doc(db, "organizations", organizationId, "rules", rule.id);
-        batch.set(ruleRef, {
+        batch.set(doc(db, "organizations", organizationId, "rules", rule.id), {
           name: getRuleName(rule), rule: getRuleName(rule),
           description: rule.description, category: rule.category ?? "style",
           source: rule.source ?? null, status: "active",
@@ -131,6 +154,7 @@ export default function CriteriaPage() {
     }
   };
 
+  // ---- Extraction by IA ----
   const handleExtraction = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!originalFile || !correctedFile || !organizationId) {
@@ -158,17 +182,141 @@ export default function CriteriaPage() {
         throw new Error(err.detail || "API extraction failed");
       }
 
-      setIsModalOpen(false);
+      setIsExtractModalOpen(false);
       setOriginalFile(null);
       setCorrectedFile(null);
     } catch (error) {
-      console.error(error);
       alert("Error deduciendo normas: " + (error instanceof Error ? error.message : String(error)));
     } finally {
       setIsExtracting(false);
     }
   };
 
+  // ---- Manual rule CRUD ----
+  const openCreateModal = () => {
+    setEditingRule(null);
+    setRuleForm(EMPTY_FORM);
+    setRuleError("");
+    setIsRuleModalOpen(true);
+  };
+
+  const openEditModal = (rule: Criterion) => {
+    setEditingRule(rule);
+    setRuleForm({
+      name: getRuleName(rule),
+      description: rule.description,
+      category: rule.category ?? "style",
+    });
+    setRuleError("");
+    setIsRuleModalOpen(true);
+  };
+
+  const handleSaveRule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRuleError("");
+    if (!ruleForm.name.trim() || !ruleForm.description.trim()) {
+      setRuleError("El nombre y la descripción son obligatorios.");
+      return;
+    }
+    if (!organizationId) return;
+    setIsSavingRule(true);
+    try {
+      const ruleData = {
+        name: ruleForm.name.trim(),
+        rule: ruleForm.name.trim(),
+        description: ruleForm.description.trim(),
+        category: ruleForm.category,
+        status: "active" as const,
+        source: "Manual",
+      };
+
+      if (editingRule) {
+        // Edit existing
+        await updateDoc(doc(db, "organizations", organizationId, "rules", editingRule.id), ruleData);
+      } else {
+        // Create new with auto-id
+        const newRef = doc(collection(db, "organizations", organizationId, "rules"));
+        await setDoc(newRef, ruleData);
+      }
+      setIsRuleModalOpen(false);
+    } catch (err) {
+      setRuleError("Error al guardar: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsSavingRule(false);
+    }
+  };
+
+  const handleDeleteRule = async (rule: Criterion) => {
+    if (!confirm(`¿Eliminar la regla "${getRuleName(rule)}"? Esta acción no se puede deshacer.`)) return;
+    if (!organizationId) return;
+    try {
+      await deleteDoc(doc(db, "organizations", organizationId, "rules", rule.id));
+    } catch (err) {
+      alert("Error al eliminar: " + (err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  // ---- Export manual as .docx ----
+  const handleExportManual = async () => {
+    if (activeRules.length === 0) {
+      alert("No hay reglas activas para exportar.");
+      return;
+    }
+    setIsExporting(true);
+    try {
+      const children: Paragraph[] = [
+        new Paragraph({
+          text: "Manual de Estilo Editorial",
+          heading: HeadingLevel.HEADING_1,
+          spacing: { after: 300 },
+        }),
+        new Paragraph({
+          children: [new TextRun({ text: `${activeRules.length} criterios activos`, color: "888888", italics: true })],
+          spacing: { after: 600 },
+        }),
+      ];
+
+      // Group by category
+      const grouped: Record<string, Criterion[]> = {};
+      for (const rule of activeRules) {
+        const cat = rule.category ?? "style";
+        grouped[cat] = grouped[cat] ?? [];
+        grouped[cat].push(rule);
+      }
+
+      for (const [cat, rules] of Object.entries(grouped)) {
+        const catLabel = CATEGORY_LABELS[cat]?.label ?? cat;
+        children.push(
+          new Paragraph({
+            text: catLabel,
+            heading: HeadingLevel.HEADING_2,
+            spacing: { before: 400, after: 200 },
+          })
+        );
+        for (const rule of rules) {
+          children.push(
+            new Paragraph({
+              children: [
+                new TextRun({ text: `• ${getRuleName(rule)}: `, bold: true }),
+                new TextRun(rule.description),
+              ],
+              spacing: { after: 160 },
+            })
+          );
+        }
+      }
+
+      const wordDoc = new Document({ sections: [{ properties: {}, children }] });
+      const blob = await Packer.toBlob(wordDoc);
+      saveAs(blob, "Manual_de_Estilo.docx");
+    } catch (err) {
+      alert("Error exportando: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // ---- Category tabs widget ----
   const categoryTabs = (
     current: Category,
     setter: (c: Category) => void,
@@ -218,9 +366,30 @@ export default function CriteriaPage() {
           </p>
         </div>
         {canManage && (
-          <button className="btn" style={{ padding: "0.75rem 1.5rem", display: "flex", alignItems: "center", gap: "0.5rem" }} onClick={() => setIsModalOpen(true)}>
-            <FilePlus2 size={16} /> Deducir Nuevas Normas
-          </button>
+          <div style={{ display: "flex", gap: "0.625rem", flexWrap: "wrap", alignItems: "center" }}>
+            <button
+              className="btn btn-secondary"
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.875rem" }}
+              onClick={handleExportManual}
+              disabled={isExporting || activeRules.length === 0}
+            >
+              <Download size={15} /> {isExporting ? "Exportando..." : "Exportar Manual"}
+            </button>
+            <button
+              className="btn btn-secondary"
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.875rem" }}
+              onClick={() => setIsExtractModalOpen(true)}
+            >
+              <FilePlus2 size={15} /> Deducir con IA
+            </button>
+            <button
+              className="btn"
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+              onClick={openCreateModal}
+            >
+              <Plus size={16} /> Nueva Regla Manual
+            </button>
+          </div>
         )}
       </div>
 
@@ -269,18 +438,10 @@ export default function CriteriaPage() {
                 </p>
                 {canManage && (
                   <div style={{ display: "flex", gap: "0.625rem", justifyContent: "flex-end" }}>
-                    <button
-                      className="btn btn-secondary"
-                      style={{ padding: "0.4rem 1rem", fontSize: "0.8125rem", display: "flex", alignItems: "center", gap: "0.375rem" }}
-                      onClick={() => handleAction(rule, "rejected")}
-                    >
+                    <button className="btn btn-secondary" style={{ padding: "0.4rem 1rem", fontSize: "0.8125rem", display: "flex", alignItems: "center", gap: "0.375rem" }} onClick={() => handleAction(rule, "rejected")}>
                       <XCircle size={13} /> Rechazar
                     </button>
-                    <button
-                      className="btn"
-                      style={{ padding: "0.4rem 1rem", fontSize: "0.8125rem", display: "flex", alignItems: "center", gap: "0.375rem" }}
-                      onClick={() => handleAction(rule, "approved")}
-                    >
+                    <button className="btn" style={{ padding: "0.4rem 1rem", fontSize: "0.8125rem", display: "flex", alignItems: "center", gap: "0.375rem" }} onClick={() => handleAction(rule, "approved")}>
                       <CheckCircle2 size={13} /> Aprobar
                     </button>
                   </div>
@@ -310,28 +471,46 @@ export default function CriteriaPage() {
             <Scale size={36} style={{ color: "var(--text-muted)", opacity: 0.4, marginBottom: "1rem" }} />
             <p style={{ color: "var(--text-muted)" }}>
               {activeRules.length === 0
-                ? "No hay normas configuradas. Aprueba las pendientes para activarlas."
+                ? "No hay normas configuradas. Crea una manualmente o aprueba las pendientes."
                 : "No hay normas en esta categoría."}
             </p>
           </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "1rem" }}>
             {filteredActive.map(rule => (
-              <div key={rule.id} className="card-static" style={{ padding: "1.25rem 1.5rem" }}>
+              <div key={rule.id} className="card-static" style={{ padding: "1.25rem 1.5rem", position: "relative" }}>
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "0.5rem", marginBottom: "0.5rem" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", flex: 1 }}>
                     <Scale size={14} style={{ color: "var(--primary)", flexShrink: 0 }} />
                     <h3 style={{ fontSize: "0.9375rem", fontWeight: 700, color: "var(--text-main)" }}>{getRuleName(rule)}</h3>
                   </div>
                   <CategoryBadge category={rule.category} />
                 </div>
-                <p style={{ color: "var(--text-muted)", fontSize: "0.8375rem", lineHeight: 1.6 }}>
+                <p style={{ color: "var(--text-muted)", fontSize: "0.8375rem", lineHeight: 1.6, marginBottom: rule.source ? "0.5rem" : "0" }}>
                   {rule.description}
                 </p>
                 {rule.source && (
-                  <p style={{ marginTop: "0.625rem", fontSize: "0.7rem", color: "var(--text-muted)", fontStyle: "italic" }}>
+                  <p style={{ marginTop: "0.5rem", fontSize: "0.7rem", color: "var(--text-muted)", fontStyle: "italic" }}>
                     Fuente: {rule.source.replace(" Manuscrito.docx", "")}
                   </p>
+                )}
+                {canManage && (
+                  <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.875rem", paddingTop: "0.75rem", borderTop: "1px solid var(--border-color)" }}>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ flex: 1, padding: "0.35rem 0.5rem", fontSize: "0.75rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.3rem" }}
+                      onClick={() => openEditModal(rule)}
+                    >
+                      <PenLine size={12} /> Editar
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ flex: 1, padding: "0.35rem 0.5rem", fontSize: "0.75rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.3rem", borderColor: "rgba(239,68,68,0.3)", color: "var(--danger)" }}
+                      onClick={() => handleDeleteRule(rule)}
+                    >
+                      <Trash2 size={12} /> Eliminar
+                    </button>
+                  </div>
                 )}
               </div>
             ))}
@@ -339,13 +518,92 @@ export default function CriteriaPage() {
         )}
       </div>
 
-      {/* EXTRACTION MODAL */}
-      {isModalOpen && (
+      {/* MODAL: Nueva/Editar Regla Manual */}
+      {isRuleModalOpen && (
+        <div className="modal-overlay">
+          <div className="card fade-in modal-content" style={{ maxWidth: "520px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
+              <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--text-main)", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <Scale size={20} style={{ color: "var(--primary)" }} />
+                {editingRule ? "Editar Regla" : "Nueva Regla Manual"}
+              </h2>
+              <button onClick={() => setIsRuleModalOpen(false)} className="btn-ghost" style={{ padding: "0.25rem" }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveRule}>
+              <div style={{ display: "grid", gap: "1rem", marginBottom: "1.5rem" }}>
+                <div>
+                  <label style={{ display: "block", marginBottom: "0.375rem", fontSize: "0.875rem", fontWeight: 600, color: "var(--text-main)" }}>
+                    Nombre de la regla
+                  </label>
+                  <input
+                    type="text"
+                    className="input"
+                    value={ruleForm.name}
+                    onChange={e => setRuleForm(f => ({ ...f, name: e.target.value }))}
+                    placeholder="Ej. Uso de comillas latinas"
+                    required
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label style={{ display: "block", marginBottom: "0.375rem", fontSize: "0.875rem", fontWeight: 600, color: "var(--text-main)" }}>
+                    Descripción / explicación
+                  </label>
+                  <textarea
+                    className="input"
+                    value={ruleForm.description}
+                    onChange={e => setRuleForm(f => ({ ...f, description: e.target.value }))}
+                    placeholder="Ej. Usar comillas latinas (« ») en lugar de anglosajones (&quot; &quot;). Las comillas simples se reservan para citas dentro de citas."
+                    required
+                    rows={4}
+                    style={{ resize: "vertical", fontFamily: "inherit" }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: "block", marginBottom: "0.375rem", fontSize: "0.875rem", fontWeight: 600, color: "var(--text-main)" }}>
+                    Categoría
+                  </label>
+                  <select
+                    className="input"
+                    value={ruleForm.category}
+                    onChange={e => setRuleForm(f => ({ ...f, category: e.target.value }))}
+                  >
+                    {CATEGORIES_LIST.map(c => (
+                      <option key={c} value={c}>{CATEGORY_LABELS[c]?.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {ruleError && (
+                <div style={{ color: "var(--danger)", fontSize: "0.875rem", marginBottom: "1rem", padding: "0.625rem 0.875rem", backgroundColor: "rgba(239,68,68,0.08)", borderRadius: "var(--radius-md)" }}>
+                  {ruleError}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: "0.75rem" }}>
+                <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setIsRuleModalOpen(false)}>
+                  Cancelar
+                </button>
+                <button type="submit" className="btn" style={{ flex: 1 }} disabled={isSavingRule}>
+                  {isSavingRule ? "Guardando..." : editingRule ? "Guardar Cambios" : "Añadir Regla"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Extracción IA */}
+      {isExtractModalOpen && (
         <div className="modal-overlay">
           <div className="card fade-in modal-content" style={{ maxWidth: "600px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
-              <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--text-main)" }}>Deducción de Normas</h2>
-              <button onClick={() => setIsModalOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: "1.25rem" }}>✕</button>
+              <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--text-main)" }}>Deducción de Normas con IA</h2>
+              <button onClick={() => setIsExtractModalOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: "1.25rem" }}>✕</button>
             </div>
             <p style={{ color: "var(--text-muted)", fontSize: "0.875rem", marginBottom: "1.5rem", lineHeight: 1.6 }}>
               Sube el manuscrito original y su versión corregida. El motor IA detectará los patrones editoriales y extraerá las normas subyacentes.
@@ -375,7 +633,7 @@ export default function CriteriaPage() {
               </div>
 
               <div style={{ display: "flex", gap: "0.75rem" }}>
-                <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setIsModalOpen(false)}>Cancelar</button>
+                <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setIsExtractModalOpen(false)}>Cancelar</button>
                 <button type="submit" className="btn" style={{ flex: 1 }} disabled={isExtracting || !originalFile || !correctedFile}>
                   {isExtracting ? "Analizando..." : "Extraer Normas"}
                 </button>

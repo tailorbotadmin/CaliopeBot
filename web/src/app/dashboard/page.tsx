@@ -7,7 +7,7 @@ import {
   FileText, Clock, Target, PenLine, FolderOpen, Palette,
   Loader2, TrendingUp, BookOpen, ChevronRight, CheckCircle2, Sparkles,
 } from "lucide-react";
-import { collection, getDocs, query, orderBy, limit } from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { getOrganizations } from "@/lib/firestore";
 
@@ -107,15 +107,6 @@ export default function DashboardPage() {
     };
     fetchForRole();
   }, [loading, user, role, organizationId, computeKPIs]);
-
-  const statVal = (val: number | null) =>
-    kpiLoading ? (
-      <Loader2 size={18} style={{ animation: "spin 1s linear infinite", color: "var(--text-muted)" }} />
-    ) : val === null ? (
-      <span style={{ color: "var(--text-muted)" }}>—</span>
-    ) : (
-      String(val)
-    );
 
   const stats = [
     {

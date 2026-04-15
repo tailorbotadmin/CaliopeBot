@@ -99,3 +99,6 @@ chroma_data/
 
 # Docker volumes
 data/
+
+# Allow E2E test fixtures
+!web/tests/fixtures/*.docx

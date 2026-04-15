@@ -637,6 +637,68 @@ async def create_user_endpoint(request: CreateUserRequest, raw_req: Request):
         logger.error(f"Error creating user: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+class DeleteUserRequest(BaseModel):
+    targetUid: str
+
+
+@app.delete("/api/v1/users/delete")
+async def delete_user(request: DeleteUserRequest, raw_req: Request):
+    """Admin endpoint to delete a user from Firebase Auth and Firestore."""
+    auth_header = raw_req.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
+
+    token = auth_header.split("Bearer ")[1]
+    try:
+        from firebase_admin import auth as firebase_auth
+
+        decoded_token = firebase_auth.verify_id_token(token)
+        caller_role = decoded_token.get("role", "")
+
+        if caller_role not in ["Admin", "SuperAdmin"]:
+            raise HTTPException(status_code=403, detail="Forbidden, insufficient permissions")
+
+        # Fetch target user to enforce cross-org and self-delete protections
+        target_doc = db.collection("users").document(request.targetUid).get()
+        if not target_doc.exists:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        target_data = target_doc.to_dict()
+        target_role = target_data.get("role", "")
+        target_org = target_data.get("organizationId")
+        caller_org = decoded_token.get("organizationId")
+
+        # Prevent cross-org deletion (except SuperAdmin)
+        if caller_role != "SuperAdmin" and target_org != caller_org:
+            raise HTTPException(status_code=403, detail="Cannot delete users outside your organization")
+
+        # Admins cannot delete other Admins or SuperAdmins
+        if caller_role == "Admin" and target_role in ["Admin", "SuperAdmin"]:
+            raise HTTPException(status_code=403, detail="Admins cannot delete Admin or SuperAdmin users")
+
+        # Prevent self-deletion
+        if request.targetUid == decoded_token.get("uid"):
+            raise HTTPException(status_code=400, detail="Cannot delete your own account")
+
+        # Delete from Firebase Auth
+        firebase_auth.delete_user(request.targetUid)
+
+        # Delete Firestore profile
+        db.collection("users").document(request.targetUid).delete()
+
+        logger.info(
+            f"User deleted: uid={request.targetUid} (role={target_role}) "
+            f"by {decoded_token['uid']} (role={caller_role})"
+        )
+        return {"status": "success", "uid": request.targetUid}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting user: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

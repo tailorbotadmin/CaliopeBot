@@ -71,6 +71,30 @@ export default function SettingsPage() {
     );
   }
 
+  const handleDeleteUser = async (uid: string, name: string) => {
+    if (!confirm(`¿Eliminar a "${name}" de la organización? Esta acción no se puede deshacer y revocará su acceso inmediatamente.`)) return;
+    setUpdatingUid(uid);
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      if (!token) throw new Error("Sesión no válida");
+
+      const res = await fetch(`${API_URL}/api/v1/users/delete`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ targetUid: uid }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.detail ?? "Error al eliminar usuario");
+
+      setMembers(prev => prev.filter(m => m.uid !== uid));
+      setMessage({ type: "success", text: `Usuario "${name}" eliminado correctamente.` });
+    } catch (err) {
+      setMessage({ type: "error", text: "Error al eliminar: " + (err instanceof Error ? err.message : String(err)) });
+    } finally {
+      setUpdatingUid(null);
+    }
+  };
+
   const handleRoleChange = async (uid: string, newRole: Role) => {
     setUpdatingUid(uid);
     try {
@@ -327,9 +351,26 @@ export default function SettingsPage() {
                         )}
                         {canEdit && !isMe && (
                           <button
-                            title="Eliminar usuario (próximamente)"
-                            style={{ background: "none", border: "none", cursor: "not-allowed", color: "var(--text-muted)", opacity: 0.4, padding: "0.25rem" }}
-                            disabled
+                            title={`Eliminar a ${member.displayName ?? member.email}`}
+                            disabled={updatingUid === member.uid}
+                            onClick={() => handleDeleteUser(member.uid, member.displayName ?? member.email)}
+                            style={{
+                              background: "none", border: "1px solid transparent", cursor: "pointer",
+                              color: "var(--text-muted)", padding: "0.35rem 0.5rem",
+                              borderRadius: "var(--radius-sm)", display: "flex", alignItems: "center",
+                              transition: "all 0.15s",
+                              opacity: updatingUid === member.uid ? 0.4 : 1,
+                            }}
+                            onMouseEnter={e => {
+                              (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(239,68,68,0.4)";
+                              (e.currentTarget as HTMLButtonElement).style.color = "var(--danger)";
+                              (e.currentTarget as HTMLButtonElement).style.backgroundColor = "rgba(239,68,68,0.06)";
+                            }}
+                            onMouseLeave={e => {
+                              (e.currentTarget as HTMLButtonElement).style.borderColor = "transparent";
+                              (e.currentTarget as HTMLButtonElement).style.color = "var(--text-muted)";
+                              (e.currentTarget as HTMLButtonElement).style.backgroundColor = "transparent";
+                            }}
                           >
                             <Trash2 size={15} />
                           </button>

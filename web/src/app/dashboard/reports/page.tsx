@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { computeOrgKPIs, getOrganizations, OrgKPIs, Organization } from "@/lib/firestore";
+import { computeOrgKPIs, getOrganizations, getOrgCorrections, OrgKPIs, Organization, CorrectionRecord } from "@/lib/firestore";
 import {
   BarChart3, TrendingUp, UserCheck, AlertTriangle,
   CheckCircle2, XCircle, RefreshCw, Building2,
@@ -20,12 +20,90 @@ function AcceptBar({ rate }: { rate: number }) {
   );
 }
 
+type WeekBucket = { label: string; accepted: number; rejected: number };
+
+function groupByWeek(records: CorrectionRecord[]): WeekBucket[] {
+  const map = new Map<string, WeekBucket>();
+  for (const r of records) {
+    if (!r.createdAt) continue;
+    const d = r.createdAt.toDate();
+    // ISO week label: YYYY-Www
+    const jan4 = new Date(d.getFullYear(), 0, 4);
+    const week = Math.ceil(((d.getTime() - jan4.getTime()) / 86400000 + jan4.getDay() + 1) / 7);
+    const label = `S${week < 10 ? "0" + week : week}`;
+    if (!map.has(label)) map.set(label, { label, accepted: 0, rejected: 0 });
+    const b = map.get(label)!;
+    if (r.status === "accepted") b.accepted++;
+    else if (r.status === "rejected") b.rejected++;
+  }
+  // Sort by label and keep last 8 weeks
+  return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-8).map(e => e[1]);
+}
+
+function TemporalBarChart({ buckets }: { buckets: WeekBucket[] }) {
+  if (buckets.length < 2) return (
+    <div style={{ padding: "2.5rem", textAlign: "center", color: "var(--text-muted)", fontSize: "0.875rem" }}>
+      Se necesitan datos de al menos 2 semanas para mostrar la evolución temporal.
+    </div>
+  );
+
+  const maxVal = Math.max(...buckets.map(b => b.accepted + b.rejected), 1);
+  const W = 60; // bar group width
+  const H = 120; // chart height
+  const GAP = 8;
+  const totalW = buckets.length * (W + GAP) + GAP;
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${totalW} ${H + 28}`} style={{ overflow: "visible" }}>
+      {buckets.map((b, i) => {
+        const x = GAP + i * (W + GAP);
+        const acceptH = Math.round((b.accepted / maxVal) * H);
+        const rejectH = Math.round((b.rejected / maxVal) * H);
+        const barW = W - 4;
+        return (
+          <g key={b.label}>
+            {/* Rejected bar (behind, lighter) */}
+            {rejectH > 0 && (
+              <rect
+                x={x + 2} y={H - rejectH}
+                width={barW} height={rejectH}
+                rx={3} fill="rgba(239,68,68,0.2)"
+                style={{ transition: "height 0.5s ease" }}
+              />
+            )}
+            {/* Accepted bar (foreground) */}
+            {acceptH > 0 && (
+              <rect
+                x={x + 2} y={H - acceptH}
+                width={barW} height={acceptH}
+                rx={3} fill="var(--success)" opacity={0.85}
+                style={{ transition: "height 0.5s ease" }}
+              />
+            )}
+            {/* Week label */}
+            <text x={x + W / 2} y={H + 16} textAnchor="middle" fontSize={9} fill="var(--text-muted)">{b.label}</text>
+            {/* Count on top */}
+            {b.accepted + b.rejected > 0 && (
+              <text x={x + W / 2} y={H - Math.max(acceptH, rejectH) - 4} textAnchor="middle" fontSize={9} fill="var(--text-main)" fontWeight={600}>
+                {b.accepted + b.rejected}
+              </text>
+            )}
+          </g>
+        );
+      })}
+      {/* Baseline */}
+      <line x1={0} y1={H} x2={totalW} y2={H} stroke="var(--border-color)" strokeWidth={1} />
+    </svg>
+  );
+}
+
 export default function ReportsPage() {
   const { role, organizationId } = useAuth();
   const [kpis, setKpis] = useState<OrgKPIs | null>(null);
   const [loading, setLoading] = useState(true);
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string>("");
+  const [weekBuckets, setWeekBuckets] = useState<WeekBucket[]>([]);
 
   const isSuperAdmin = role === "SuperAdmin";
 
@@ -33,8 +111,12 @@ export default function ReportsPage() {
     if (!orgId) return;
     setLoading(true);
     try {
-      const data = await computeOrgKPIs(orgId);
+      const [data, records] = await Promise.all([
+        computeOrgKPIs(orgId),
+        getOrgCorrections(orgId),
+      ]);
       setKpis(data);
+      setWeekBuckets(groupByWeek(records));
     } catch (err) {
       console.error("Error fetching KPIs:", err);
     } finally {
@@ -126,6 +208,20 @@ export default function ReportsPage() {
                 </div>
               );
             })}
+          </div>
+
+          {/* Temporal evolution chart */}
+          <div className="card-static" style={{ marginBottom: "2rem", padding: 0, overflow: "hidden" }}>
+            <div style={{ padding: "1.25rem 1.75rem", borderBottom: "1px solid var(--border-color)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h2 style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text-main)" }}>Evolución Semanal</h2>
+              <div style={{ display: "flex", gap: "1rem", fontSize: "0.75rem" }}>
+                <span style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}><span style={{ width: "10px", height: "10px", borderRadius: "2px", backgroundColor: "var(--success)", display: "inline-block" }} /> Aceptadas</span>
+                <span style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}><span style={{ width: "10px", height: "10px", borderRadius: "2px", backgroundColor: "rgba(239,68,68,0.3)", display: "inline-block" }} /> Rechazadas</span>
+              </div>
+            </div>
+            <div style={{ padding: "1.5rem 2rem" }}>
+              <TemporalBarChart buckets={weekBuckets} />
+            </div>
           </div>
 
           {/* Accepted / Rejected summary */}

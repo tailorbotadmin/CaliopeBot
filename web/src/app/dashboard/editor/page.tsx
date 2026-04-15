@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { collection, query, orderBy, getDocs, doc, setDoc, getDoc } from "firebase/firestore";
+import { collection, query, orderBy, getDocs, doc, setDoc, getDoc, addDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { updateBookStatus } from "@/lib/firestore";
 import { Document, Packer, Paragraph, TextRun } from "docx";
@@ -150,25 +150,43 @@ export default function EditorPage() {
     setSuggestions(newSuggestions);
     await saveChunkLocally(newSuggestions);
 
-    if (action === "accepted" && organizationId && user) {
-      const acceptedSug = newSuggestions.find(s => s.id === id);
-      if (acceptedSug) {
-        try {
-          const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-          await fetch(`${apiUrl}/api/v1/learn-correction`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              tenantId: organizationId,
-              authorId: user.uid,
-              role,
-              originalText: acceptedSug.originalText,
-              correctedText: acceptedSug.correctedText,
-              justification: acceptedSug.justification,
-            }),
-          });
-        } catch (e) { console.error("Could not trigger learn-correction", e); }
-      }
+    const actedSug = newSuggestions.find(s => s.id === id);
+
+    // Write CorrectionRecord → feeds computeOrgKPIs in Reports
+    if (organizationId && user && actedSug) {
+      try {
+        await addDoc(collection(db, "corrections"), {
+          bookId: bookId ?? null,
+          organizationId,
+          editorId: user.uid,
+          editorEmail: user.email ?? null,
+          editorName: user.displayName ?? user.email ?? null,
+          status: action,
+          sourceRule: actedSug.sourceRule ?? null,
+          originalText: actedSug.originalText,
+          correctedText: actedSug.correctedText,
+          createdAt: serverTimestamp(),
+        });
+      } catch (e) { console.error("Could not write correction record", e); }
+    }
+
+    // Trigger RAG self-learning only for accepted suggestions
+    if (action === "accepted" && organizationId && user && actedSug) {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+        await fetch(`${apiUrl}/api/v1/learn-correction`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tenantId: organizationId,
+            authorId: user.uid,
+            role,
+            originalText: actedSug.originalText,
+            correctedText: actedSug.correctedText,
+            justification: actedSug.justification,
+          }),
+        });
+      } catch (e) { console.error("Could not trigger learn-correction", e); }
     }
   };
 

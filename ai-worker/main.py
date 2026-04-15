@@ -321,7 +321,7 @@ async def process_book_background(org_id: str, book_id: str, author_id: str):
             db.collection("organizations").document(org_id)
             .collection("books").document(book_id)
         )
-        book_ref.update({"status": "ready", "processedChunks": processed_count})
+        book_ref.update({"status": "review_editor", "processedChunks": processed_count})
         logger.info(f"Background done: book={book_id}, processed={processed_count}")
 
     except Exception as e:

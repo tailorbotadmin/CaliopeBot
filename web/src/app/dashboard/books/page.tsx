@@ -2,10 +2,13 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { getBooksByOrganization, getOrganizations, createBook, Book, Organization } from "@/lib/firestore";
-import { FolderOpen, FileText, UploadCloud, CheckCircle2, Clock, Loader2 } from "lucide-react";
+import { getBooksByOrganization, getOrganizations, createBook, updateBookStatus, Book, Organization } from "@/lib/firestore";
+import { FolderOpen, FileText, UploadCloud, CheckCircle2, Clock, Loader2, Download, Unlock } from "lucide-react";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import { storage } from "@/lib/firebase";
+import { storage, db } from "@/lib/firebase";
+import { collection, query, orderBy, getDocs } from "firebase/firestore";
+import { Document, Packer, Paragraph, TextRun } from "docx";
+import { saveAs } from "file-saver";
 import Link from "next/link";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -14,6 +17,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }
   draft:               { label: "Borrador",           color: "var(--text-muted)",  bg: "var(--border-color)" },
   processing:          { label: "Procesando",          color: "#f59e0b",            bg: "rgba(245,158,11,0.12)" },
   review_editor:       { label: "Revisión Editor",     color: "#6366f1",            bg: "rgba(99,102,241,0.12)" },
+  ready:               { label: "Revisión Editor",     color: "#6366f1",            bg: "rgba(99,102,241,0.12)" },
   review_author:       { label: "Revisión Autor",      color: "#06b6d4",            bg: "rgba(6,182,212,0.12)" },
   review_responsable:  { label: "Aprobación Final",    color: "#a855f7",            bg: "rgba(168,85,247,0.12)" },
   approved:            { label: "Aprobado",            color: "var(--success)",     bg: "rgba(16,185,129,0.12)" },
@@ -32,6 +36,8 @@ export default function BooksPage() {
   const [selectedOrgId, setSelectedOrgId] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [reopeningId, setReopeningId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -72,6 +78,63 @@ export default function BooksPage() {
       const fetchedBooks = await getBooksByOrganization(orgId);
       setBooks(fetchedBooks);
       setIsLoading(false);
+    }
+  };
+
+  // ---- Download edited .docx from library ----
+  const handleDownloadEditedDocx = async (book: Book) => {
+    if (!book.id || !selectedOrgId) return;
+    setDownloadingId(book.id);
+    try {
+      const chunksRef = collection(db, "organizations", selectedOrgId, "books", book.id, "chunks");
+      const q = query(chunksRef, orderBy("order", "asc"));
+      const snap = await getDocs(q);
+
+      const docChildren = snap.docs.map(d => {
+        const data = d.data();
+        let text: string = data.text ?? "";
+        const suggestions = (data.suggestions ?? []) as Array<{
+          status: string; originalText: string; correctedText: string;
+        }>;
+        suggestions.forEach(s => {
+          if (s.status !== "rejected") {
+            text = text.replace(s.originalText, s.correctedText);
+          }
+        });
+        return new Paragraph({
+          children: [new TextRun(text)],
+          spacing: { after: 200 },
+        });
+      });
+
+      const wordDoc = new Document({
+        sections: [{ properties: {}, children: docChildren }],
+      });
+      const blob = await Packer.toBlob(wordDoc);
+      const safeTitle = book.title.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ _-]/g, "");
+      saveAs(blob, `${safeTitle}_Editado.docx`);
+    } catch (err) {
+      console.error("Error generando descarga:", err);
+      alert("Error al generar el documento editado.");
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  // ---- Reopen editing ----
+  const handleReopenEditing = async (book: Book) => {
+    if (!confirm(`¿Reabrir la edición de "${book.title}"? El manuscrito volverá al estado de Revisión Editor.`)) return;
+    if (!book.id || !selectedOrgId) return;
+    setReopeningId(book.id);
+    try {
+      await updateBookStatus(selectedOrgId, book.id, "review_editor");
+      const fetchedBooks = await getBooksByOrganization(selectedOrgId);
+      setBooks(fetchedBooks);
+    } catch (err) {
+      console.error("Error reabriendo edición:", err);
+      alert("No se pudo reabrir la edición.");
+    } finally {
+      setReopeningId(null);
     }
   };
 
@@ -231,9 +294,45 @@ export default function BooksPage() {
                   )}
                 </div>
 
-                <div style={{ marginTop: "auto", paddingTop: "0.875rem", borderTop: "1px solid var(--border-color)" }}>
-                  <Link href={`/dashboard/editor?bookId=${book.id}`} className="btn" style={{ textDecoration: "none", width: "100%", fontSize: "0.8125rem", display: "block", textAlign: "center" }}>
-                    Abrir Editor →
+                <div style={{ marginTop: "auto", paddingTop: "0.875rem", borderTop: "1px solid var(--border-color)", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  {book.status === "approved" && (
+                    <>
+                      <button
+                        className="btn"
+                        style={{
+                          width: "100%", fontSize: "0.8125rem",
+                          backgroundColor: "var(--success)", display: "flex",
+                          alignItems: "center", justifyContent: "center", gap: "0.375rem",
+                        }}
+                        onClick={() => handleDownloadEditedDocx(book)}
+                        disabled={downloadingId === book.id}
+                      >
+                        {downloadingId === book.id
+                          ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Generando...</>
+                          : <><Download size={14} /> Descargar Editado</>}
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        style={{
+                          width: "100%", fontSize: "0.8125rem",
+                          display: "flex", alignItems: "center", justifyContent: "center", gap: "0.375rem",
+                          borderColor: "#f59e0b", color: "#f59e0b",
+                        }}
+                        onClick={() => handleReopenEditing(book)}
+                        disabled={reopeningId === book.id}
+                      >
+                        {reopeningId === book.id
+                          ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Reabriendo...</>
+                          : <><Unlock size={14} /> Reabrir Edición</>}
+                      </button>
+                    </>
+                  )}
+                  <Link
+                    href={`/dashboard/editor?bookId=${book.id}`}
+                    className="btn btn-secondary"
+                    style={{ textDecoration: "none", width: "100%", fontSize: "0.8125rem", display: "block", textAlign: "center" }}
+                  >
+                    {book.status === "approved" ? "Ver en Editor" : "Abrir Editor →"}
                   </Link>
                 </div>
               </div>

@@ -81,6 +81,9 @@ export default function CriteriaPage() {
   // Export
   const [isExporting, setIsExporting] = useState(false);
 
+  const [isSeeding, setIsSeeding] = useState(false);
+  const [seedResult, setSeedResult] = useState<string | null>(null);
+
   const canManage = role === "SuperAdmin" || role === "Admin" || role === "Responsable_Editorial";
 
   useEffect(() => {
@@ -110,6 +113,34 @@ export default function CriteriaPage() {
   );
 
   const getRuleName = (rule: Criterion) => rule.name ?? rule.rule ?? "Regla sin nombre";
+
+  // ---- Seed RAE rules ----
+  const handleSeedRAE = async () => {
+    if (!organizationId) return;
+    if (!confirm(`¿Cargar las reglas canónicas RAE (Ortografía 2010 + DPD) en el manual de estilo? Las reglas ya existentes no se duplicarán.`)) return;
+    setIsSeeding(true);
+    setSeedResult(null);
+    try {
+      const { auth: firebaseAuth } = await import("@/lib/firebase");
+      const token = await firebaseAuth.currentUser?.getIdToken();
+      const res = await fetch(`${API_URL}/api/v1/seed-rae-rules`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ organizationId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail ?? "Error en seed");
+      setSeedResult(
+        data.inserted > 0
+          ? `✓ ${data.inserted} reglas RAE añadidas${data.skipped > 0 ? ` (${data.skipped} ya existían)` : ""}.`
+          : `Sin cambios: las ${data.skipped} reglas RAE ya estaban cargadas.`
+      );
+    } catch (err) {
+      setSeedResult("✕ Error: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsSeeding(false);
+    }
+  };
 
   // ---- Approve pending rule ----
   const handleAction = async (rule: Criterion, action: "approved" | "rejected") => {
@@ -367,6 +398,17 @@ export default function CriteriaPage() {
         </div>
         {canManage && (
           <div style={{ display: "flex", gap: "0.625rem", flexWrap: "wrap", alignItems: "center" }}>
+            {role === "SuperAdmin" && (
+              <button
+                className="btn btn-secondary"
+                style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.875rem" }}
+                onClick={handleSeedRAE}
+                disabled={isSeeding}
+                title="Cargar las 30+ reglas canónicas RAE/Fundéu en el manual de estilo"
+              >
+                {isSeeding ? "Cargando..." : "📚 Reglas RAE"}
+              </button>
+            )}
             <button
               className="btn btn-secondary"
               style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.875rem" }}
@@ -392,6 +434,23 @@ export default function CriteriaPage() {
           </div>
         )}
       </div>
+
+      {/* Seed RAE result banner */}
+      {seedResult && (
+        <div style={{
+          marginBottom: "1.5rem",
+          padding: "0.75rem 1rem",
+          borderRadius: "var(--radius-md)",
+          fontSize: "0.875rem",
+          backgroundColor: seedResult.startsWith("✓") ? "rgba(16,185,129,0.07)" : "rgba(239,68,68,0.07)",
+          color: seedResult.startsWith("✓") ? "var(--success)" : "var(--danger)",
+          border: `1px solid ${seedResult.startsWith("✓") ? "rgba(16,185,129,0.2)" : "rgba(239,68,68,0.2)"}`,
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          {seedResult}
+          <button onClick={() => setSeedResult(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", fontSize: "1rem", padding: "0 0.25rem" }}>✕</button>
+        </div>
+      )}
 
       {/* PENDING RULES */}
       {pendingRules.length > 0 && (

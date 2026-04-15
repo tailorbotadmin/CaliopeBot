@@ -1,8 +1,17 @@
 [
   {
-    "origin": ["*"],
-    "method": ["GET", "PUT", "POST", "DELETE", "HEAD", "OPTIONS"],
+    "origin": [
+      "https://caliope.tailorbot.tech",
+      "http://localhost:3000",
+      "http://localhost:3001"
+    ],
+    "method": ["GET", "PUT", "HEAD", "OPTIONS"],
     "maxAgeSeconds": 3600,
-    "responseHeader": ["*"]
+    "responseHeader": [
+      "Content-Type",
+      "Content-Length",
+      "Content-Disposition",
+      "x-goog-meta-firebasestoragedownloadtokens"
+    ]
   }
 ]

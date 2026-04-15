@@ -699,6 +699,92 @@ async def delete_user(request: DeleteUserRequest, raw_req: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class SeedRAERulesRequest(BaseModel):
+    organizationId: str
+
+
+@app.post("/api/v1/seed-rae-rules")
+async def seed_rae_rules_endpoint(request: SeedRAERulesRequest, raw_req: Request):
+    """SuperAdmin endpoint: populate an org with the canonical RAE rules corpus."""
+    auth_header = raw_req.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
+
+    token = auth_header.split("Bearer ")[1]
+    try:
+        from firebase_admin import auth as firebase_auth
+
+        decoded_token = firebase_auth.verify_id_token(token)
+        if decoded_token.get("role") != "SuperAdmin":
+            raise HTTPException(status_code=403, detail="Only SuperAdmins can seed RAE rules")
+
+        # Import the RAE corpus defined in the seed script
+        import sys, os
+        scripts_dir = os.path.join(os.path.dirname(__file__), "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        from seed_rae_rules import RAE_RULES  # type: ignore
+
+        org_ref = db.collection("organizations").document(request.organizationId)
+
+        # Check which rules already exist to avoid duplicates
+        existing_snap = org_ref.collection("rules").stream()
+        existing_ids = {doc.id for doc in existing_snap}
+
+        batch = db.batch()
+        inserted = 0
+        skipped = 0
+
+        for i, rule in enumerate(RAE_RULES):
+            rule_id = f"rae_{i:03d}"
+            if rule_id in existing_ids:
+                skipped += 1
+                continue
+
+            rule_doc = {
+                **rule,
+                "status": "active",
+                "source": rule.get("source", "RAE"),
+                "createdAt": firestore.SERVER_TIMESTAMP,
+            }
+            batch.set(org_ref.collection("rules").document(rule_id), rule_doc)
+
+            # Index in ChromaDB if available
+            if vector_store:
+                try:
+                    vector_store.add_editorial_rule(
+                        request.organizationId,
+                        rule_id,
+                        f"{rule['name']}: {rule['description']}",
+                    )
+                except Exception as ve:
+                    logger.warning(f"ChromaDB indexing failed for {rule_id}: {ve}")
+
+            inserted += 1
+
+        batch.commit()
+
+        logger.info(
+            f"seed-rae-rules: org={request.organizationId} "
+            f"inserted={inserted} skipped={skipped} "
+            f"by uid={decoded_token['uid']}"
+        )
+        return {
+            "status": "success",
+            "organizationId": request.organizationId,
+            "inserted": inserted,
+            "skipped": skipped,
+            "total": len(RAE_RULES),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error seeding RAE rules: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+

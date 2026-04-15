@@ -71,8 +71,7 @@ export default function TrainingPage() {
       alert("No hay muestras aprobadas para exportar.");
       return;
     }
-
-    // Format as JSONL (compatible with prepare_dataset.py)
+    // Simple JSONL — compatible with prepare_dataset.py (BSC GPT-2)
     const lines = approved.map(item =>
       JSON.stringify({
         prompt: `<original>${item.original}</original><corrected>`,
@@ -80,13 +79,42 @@ export default function TrainingPage() {
         rule: item.rule ?? null,
       })
     );
-    const blob = new Blob([lines.join("\n")], { type: "application/jsonl" });
+    downloadBlob(lines.join("\n"), `dataset_editorial_${today()}.jsonl`);
+  };
 
-    const today = new Date().toISOString().split("T")[0];
+  const handleExportGemini = () => {
+    const approved = items.filter(i => i.status === "approved");
+    if (approved.length === 0) {
+      alert("No hay muestras aprobadas para exportar.");
+      return;
+    }
+    // Gemini Supervised Fine-Tuning format (messages[] — Vertex AI SFT)
+    const SYSTEM_PROMPT =
+      "Eres un asistente experto en corrección editorial y ortotipográfica en español. " +
+      "Tu tarea es corregir el texto proporcionado respetando el estilo del autor y " +
+      "aplicando las normativas de la RAE y buenas prácticas editoriales.";
+
+    const lines = approved.map(item =>
+      JSON.stringify({
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user",   content: `Corrige el siguiente fragmento:\n\n${item.original}` },
+          { role: "model",  content: item.aiSuggestion },
+        ],
+        rule: item.rule ?? null,
+      })
+    );
+    downloadBlob(lines.join("\n"), `dataset_gemini_${today()}.jsonl`);
+  };
+
+  const today = () => new Date().toISOString().split("T")[0];
+
+  const downloadBlob = (content: string, filename: string) => {
+    const blob = new Blob([content], { type: "application/jsonl" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `dataset_editorial_${today}.jsonl`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -111,13 +139,24 @@ export default function TrainingPage() {
           <p>Aprueba o rechaza muestras para mejorar el modelo específico de la organización.</p>
         </div>
         {canManage && approved > 0 && (
-          <button
-            className="btn"
-            style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
-            onClick={handleExportDataset}
-          >
-            <Download size={16} /> Exportar Dataset ({approved})
-          </button>
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <button
+              className="btn btn-secondary"
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+              onClick={handleExportDataset}
+              title="Formato simple JSONL — compatible con prepare_dataset.py y BSC GPT-2"
+            >
+              <Download size={16} /> BSC / Simple ({approved})
+            </button>
+            <button
+              className="btn"
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+              onClick={handleExportGemini}
+              title="Formato messages[] para Vertex AI Supervised Fine-Tuning (Gemini)"
+            >
+              <Download size={16} /> Gemini SFT ({approved})
+            </button>
+          </div>
         )}
       </div>
 

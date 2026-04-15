@@ -34,7 +34,8 @@ RUN npm run build
 FROM node:20-alpine AS runner
 WORKDIR /app
 
-RUN addgroup --system --gid 1001 appgroup && \
+RUN apk add --no-cache curl && \
+    addgroup --system --gid 1001 appgroup && \
     adduser --system --uid 1001 appuser
 
 COPY --from=builder /app/.next/standalone ./
@@ -48,6 +49,6 @@ EXPOSE 3000
 ENV PORT=3000 HOSTNAME="0.0.0.0" NODE_ENV=production
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD wget -qO- http://localhost:3000/ || exit 1
+    CMD curl -sf http://localhost:3000/ || exit 1
 
 CMD ["node", "server.js"]

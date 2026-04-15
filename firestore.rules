@@ -50,7 +50,7 @@ service cloud.firestore {
         allow create: if (isSuperAdmin() || belongsToOrg(orgId)) &&
           request.resource.data.keys().hasAll(['title', 'status']);
         allow update: if isSuperAdmin() || (
-          belongsToOrg(orgId) && hasRole(['Admin', 'Responsable_Editorial', 'Editor'])
+          belongsToOrg(orgId) && hasRole(['Admin', 'Responsable_Editorial', 'Editor', 'Autor', 'Traductor'])
         );
         allow delete: if isSuperAdmin();
 
@@ -58,7 +58,7 @@ service cloud.firestore {
         match /chunks/{chunkId} {
           allow read: if isSuperAdmin() || belongsToOrg(orgId);
           allow write: if isSuperAdmin() || (
-            belongsToOrg(orgId) && hasRole(['Admin', 'Responsable_Editorial', 'Editor'])
+            belongsToOrg(orgId) && hasRole(['Admin', 'Responsable_Editorial', 'Editor', 'Autor', 'Traductor'])
           );
         }
       }

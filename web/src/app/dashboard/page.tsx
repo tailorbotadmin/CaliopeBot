@@ -5,7 +5,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import {
   FileText, Clock, Target, PenLine, FolderOpen, Palette,
-  Loader2, TrendingUp, BookOpen, ChevronRight,
+  Loader2, TrendingUp, BookOpen, ChevronRight, CheckCircle2, Sparkles,
 } from "lucide-react";
 import { collection, getDocs, query, orderBy, limit } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -172,6 +172,65 @@ export default function DashboardPage() {
           );
         })}
       </div>
+
+      {/* Onboarding panel — shown only when org is empty */}
+      {!kpiLoading && activeBooks === 0 && (
+        <div style={{
+          marginBottom: "2rem",
+          padding: "2rem",
+          borderRadius: "var(--radius-lg)",
+          background: "linear-gradient(135deg, rgba(99,102,241,0.06) 0%, rgba(139,92,246,0.04) 100%)",
+          border: "1px solid rgba(99,102,241,0.15)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1.25rem" }}>
+            <div style={{ width: "40px", height: "40px", borderRadius: "var(--radius-lg)", backgroundColor: "var(--primary-light)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Sparkles size={20} strokeWidth={1.75} style={{ color: "var(--primary)" }} />
+            </div>
+            <div>
+              <h2 style={{ fontSize: "1.0625rem", fontWeight: 700, color: "var(--text-main)" }}>Primeros pasos en CalíopeBot</h2>
+              <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>Sigue estos pasos para poner en marcha tu flujo editorial.</p>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.625rem" }}>
+            {/* Step 1 — Criteria (Admin/SuperAdmin only) */}
+            {(role === "SuperAdmin" || role === "Admin" || role === "Responsable_Editorial") && (
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem 1rem", borderRadius: "var(--radius-md)", backgroundColor: "var(--surface-color)", border: "1px solid var(--border-color)" }}>
+                <CheckCircle2 size={18} style={{ color: "var(--primary)", flexShrink: 0 }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: "0.875rem", color: "var(--text-main)" }}>Configura los criterios editoriales</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                    {role === "SuperAdmin"
+                      ? "Carga las reglas RAE canónicas con un clic o añade criterios manuales."
+                      : "Añade criterios manuales de estilo para tu organización."}
+                  </div>
+                </div>
+                <a href="/dashboard/criteria" className="btn btn-secondary" style={{ textDecoration: "none", padding: "0.375rem 0.875rem", fontSize: "0.8125rem", whiteSpace: "nowrap" }}>Ir a Criterios →</a>
+              </div>
+            )}
+
+            {/* Step 2 — Upload first manuscript */}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem 1rem", borderRadius: "var(--radius-md)", backgroundColor: "var(--surface-color)", border: "1px solid var(--border-color)" }}>
+              <div style={{ width: "18px", height: "18px", borderRadius: "50%", border: "2px solid var(--border-color)", flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600, fontSize: "0.875rem", color: "var(--text-main)" }}>Sube tu primer manuscrito</div>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Importa un archivo .docx para que la IA lo analice y genere sugerencias.</div>
+              </div>
+              <a href="/dashboard/books" className="btn" style={{ textDecoration: "none", padding: "0.375rem 0.875rem", fontSize: "0.8125rem", whiteSpace: "nowrap" }}>Ir a Biblioteca →</a>
+            </div>
+
+            {/* Step 3 — Review */}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem 1rem", borderRadius: "var(--radius-md)", backgroundColor: "var(--surface-color)", border: "1px solid var(--border-color)", opacity: 0.55 }}>
+              <div style={{ width: "18px", height: "18px", borderRadius: "50%", border: "2px solid var(--border-color)", flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600, fontSize: "0.875rem", color: "var(--text-main)" }}>Revisa las sugerencias de la IA</div>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Una vez procesado el manuscrito, aprueba, edita o rechaza cada corrección.</div>
+              </div>
+              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", padding: "0.375rem 0.875rem" }}>Pendiente</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Recent Books */}
       {!kpiLoading && recentBooks.length > 0 && (

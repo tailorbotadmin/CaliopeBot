@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     MAX_CHUNKS_PER_BATCH: int = 5  # chunks to process per background job
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
+        "http://localhost:3001",
+        "https://caliope.tailorbot.tech",
         "https://caliopebot-dad29.web.app",
         "https://caliopebot-dad29.firebaseapp.com",
     ]

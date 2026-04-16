@@ -438,9 +438,12 @@ async def extract_rules(request: ExtractRulesRequest):
                     "required": ["rule", "description"],
                 },
             }
-            prompt = f"""Eres un Analista Editorial experto.
+            prompt = f"""Eres un Analista Editorial experto en lengua española.
 Compara estos dos textos y DEDUCE las reglas editoriales sistemáticas que aplicó el corrector.
 Busca patrones consistentes. No devuelvas correcciones puntuales, sino REGLAS GENERALES.
+
+IMPORTANTE: Responde SIEMPRE en español. Los campos 'rule' y 'description' deben estar
+escritos en español, independientemente del idioma del texto analizado.
 
 === TEXTO ORIGINAL ===
 {text_orig}

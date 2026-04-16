@@ -98,10 +98,13 @@ class StyleTrainer:
             },
         }
 
-        prompt = f"""Eres un Analista Editorial experto en español.
+        prompt = f"""Eres un Analista Editorial experto en lengua española.
 Analiza los siguientes pares de texto (original vs corregido) y DEDUCE las reglas editoriales sistemáticas que aplicó el corrector.
 No devuelvas correcciones puntuales, sino REGLAS GENERALES y patrones repetidos.
 Categoriza cada regla como: style, grammar, format, o typography.
+
+IMPORTANTE: Responde SIEMPRE en español. El campo 'name' y el campo 'description' deben estar escritos en español,
+independientemente del idioma del texto analizado.
 
 {comparison_text}"""
 

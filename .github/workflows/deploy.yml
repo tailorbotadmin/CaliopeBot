@@ -56,11 +56,12 @@ jobs:
             --allow-unauthenticated
 
       - name: Make ai-worker publicly accessible (IAM)
+        continue-on-error: true   # GCP org policies may block allUsers; apply manually if needed
         run: |
           gcloud run services add-iam-policy-binding ${{ env.AI_WORKER_SERVICE }} \
             --region ${{ env.REGION }} \
             --member="allUsers" \
-            --role="roles/run.invoker"
+            --role="roles/run.invoker" && echo "✅ IAM binding applied" || echo "⚠️ IAM binding skipped (org policy)"
 
       - name: Get AI worker service URL
         id: get_url

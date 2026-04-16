@@ -676,11 +676,21 @@ async def delete_user(request: DeleteUserRequest, raw_req: Request):
         if caller_role not in ["Admin", "SuperAdmin", "Responsable_Editorial"]:
             raise HTTPException(status_code=403, detail="Forbidden, insufficient permissions")
 
+        # Fetch target user to enforce cross-org and self-delete protections
+        target_doc = db.collection("users").document(request.targetUid).get()
+        if not target_doc.exists:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        target_data = target_doc.to_dict()
+        target_role = target_data.get("role", "")
+        target_org = target_data.get("organizationId")
+        caller_org = decoded_token.get("organizationId")
+
         # Prevent cross-org deletion (except SuperAdmin)
         if caller_role != "SuperAdmin" and target_org != caller_org:
             raise HTTPException(status_code=403, detail="Cannot delete users outside your organization")
 
-        # Responsable_Editorial cannot delete SuperAdmins
+        # Responsable_Editorial cannot delete SuperAdmins or other Responsables
         if caller_role in ["Admin", "Responsable_Editorial"] and target_role in ["Admin", "SuperAdmin", "Responsable_Editorial"]:
             raise HTTPException(status_code=403, detail="No tienes permisos para eliminar ese usuario")
 

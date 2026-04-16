@@ -2,9 +2,10 @@
 
 import { useAuth } from "@/lib/auth-context";
 import { useRouter, usePathname } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { subscribeNotifications } from "@/lib/firestore";
 import Link from "next/link";
 import {
   LayoutDashboard,
@@ -17,6 +18,7 @@ import {
   LogOut,
   Eye,
   X,
+  Bell,
 } from "lucide-react";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -29,9 +31,19 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { user, role, loading, impersonated, stopImpersonation } = useAuth();
+  const { user, role, organizationId, loading, impersonated, stopImpersonation } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Real-time unread notifications count
+  useEffect(() => {
+    if (!organizationId || !user) return;
+    const unsub = subscribeNotifications(organizationId, user.uid, notifs => {
+      setUnreadCount(notifs.filter(n => !n.read).length);
+    });
+    return unsub;
+  }, [organizationId, user]);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -144,6 +156,30 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <nav>
             <div className="nav-section-label">Principal</div>
             {mainNav.map(renderNavItem)}
+
+            {/* Notifications — visible to all */}
+            <Link
+              href="/dashboard/notifications"
+              className={`sidebar-link ${pathname === "/dashboard/notifications" ? "active" : ""}`}
+              style={{ position: "relative" }}
+            >
+              <Bell size={18} strokeWidth={1.75} />
+              Notificaciones
+              {unreadCount > 0 && (
+                <span style={{
+                  marginLeft: "auto",
+                  backgroundColor: "var(--primary)",
+                  color: "#fff",
+                  fontSize: "0.65rem",
+                  fontWeight: 700,
+                  padding: "0.1rem 0.4rem",
+                  borderRadius: "99px",
+                  lineHeight: 1.4,
+                }}>
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </span>
+              )}
+            </Link>
 
             {showAdminNav && (
               <>

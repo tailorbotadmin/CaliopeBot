@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { collection, query, orderBy, getDocs, doc, setDoc, getDoc, addDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { updateBookStatus } from "@/lib/firestore";
+import { updateBookStatus, notifyResponsables } from "@/lib/firestore";
 import { Document, Packer, Paragraph, TextRun } from "docx";
 import { saveAs } from "file-saver";
 import { ChevronLeft, ChevronRight, ArrowLeft, Download, CheckCircle2, XCircle, Clock } from "lucide-react";
@@ -120,6 +120,24 @@ export default function EditorPage() {
 
     try {
       await updateBookStatus(organizationId, bookId, nextStatus);
+      // Notify Responsables if Editor or Autor finishes their phase
+      if ((role === "Editor" || role === "Autor" || role === "Traductor") && organizationId) {
+        try {
+          const bookTitleEl = document.querySelector("h1");
+          const bookTitle = bookTitleEl?.textContent ?? bookId ?? "";
+          await notifyResponsables(organizationId, {
+            type: "correction_done",
+            title: role === "Editor" ? "Corrección completada" : "Revisión de autor completada",
+            message: role === "Editor"
+              ? `El editor ha completado las correcciones del manuscrito y está listo para revisión del autor.`
+              : `El autor ha revisado el manuscrito y está listo para aprobación final.`,
+            bookId: bookId ?? "",
+            bookTitle: bookTitle,
+            organizationId: organizationId,
+            read: false,
+          });
+        } catch { /* non-critical */ }
+      }
       router.push("/dashboard/books");
     } catch (e) {
       console.error("Error avanzando fase", e);

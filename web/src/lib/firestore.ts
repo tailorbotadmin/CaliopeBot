@@ -7,7 +7,9 @@ import {
   updateDoc,
   query,
   where,
+  orderBy,
   getDocs,
+  onSnapshot,
   serverTimestamp,
   Timestamp
 } from 'firebase/firestore';
@@ -67,6 +69,87 @@ export async function assignBookEditor(
   await updateDoc(bookRef, { assignedEditorId: editorId, assignedEditorName: editorName });
 }
 
+
+// ==========================================
+// NOTIFICATIONS
+// ==========================================
+
+export type NotificationType =
+  | 'manuscript_uploaded'
+  | 'editor_assigned'
+  | 'correction_done'
+  | 'upload_failed';
+
+export interface Notification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  bookId: string;
+  bookTitle: string;
+  recipientId: string;
+  organizationId: string;
+  read: boolean;
+  createdAt: FirestoreDate;
+}
+
+export async function createNotification(
+  orgId: string,
+  data: Omit<Notification, 'id' | 'createdAt'>,
+) {
+  const ref = collection(db, 'organizations', orgId, 'notifications');
+  await addDoc(ref, { ...data, createdAt: serverTimestamp() });
+}
+
+/** Notify all Responsables Editoriales in an org */
+export async function notifyResponsables(
+  orgId: string,
+  data: Omit<Notification, 'id' | 'createdAt' | 'recipientId'>,
+) {
+  const users = await getOrgUsers(orgId);
+  const responsables = users.filter(u => u.role === 'Responsable_Editorial' || u.role === 'SuperAdmin');
+  await Promise.all(responsables.map(u =>
+    createNotification(orgId, { ...data, recipientId: u.uid }),
+  ));
+}
+
+export async function getNotifications(orgId: string, userId: string): Promise<Notification[]> {
+  const q = query(
+    collection(db, 'organizations', orgId, 'notifications'),
+    where('recipientId', '==', userId),
+    orderBy('createdAt', 'desc'),
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map(d => ({ id: d.id, ...d.data() } as Notification));
+}
+
+export function subscribeNotifications(
+  orgId: string,
+  userId: string,
+  callback: (notifs: Notification[]) => void,
+): () => void {
+  const q = query(
+    collection(db, 'organizations', orgId, 'notifications'),
+    where('recipientId', '==', userId),
+    orderBy('createdAt', 'desc'),
+  );
+  return onSnapshot(q, snap => {
+    callback(snap.docs.map(d => ({ id: d.id, ...d.data() } as Notification)));
+  });
+}
+
+export async function markNotificationRead(orgId: string, notifId: string) {
+  await updateDoc(doc(db, 'organizations', orgId, 'notifications', notifId), { read: true });
+}
+
+export async function markAllNotificationsRead(orgId: string, userId: string) {
+  const notifs = await getNotifications(orgId, userId);
+  await Promise.all(
+    notifs.filter(n => !n.read).map(n =>
+      updateDoc(doc(db, 'organizations', orgId, 'notifications', n.id), { read: true }),
+    ),
+  );
+}
 
 // ==========================================
 // USER PROFILES

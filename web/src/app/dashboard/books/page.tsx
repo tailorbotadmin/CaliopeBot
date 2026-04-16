@@ -4,7 +4,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
 import {
   getBooksByOrganization, getOrganizations, createBook,
-  updateBookStatus, assignBookEditor, Book, Organization, getOrgUsers, UserProfile,
+  updateBookStatus, assignBookEditor, notifyResponsables, createNotification,
+  Book, Organization, getOrgUsers, UserProfile,
 } from "@/lib/firestore";
 import {
   FolderOpen, FileText, UploadCloud, CheckCircle2, Clock, Loader2,
@@ -242,6 +243,21 @@ export default function BooksPage() {
           ? { ...b, assignedEditorId: editor?.uid ?? undefined, assignedEditorName: editor ? (editor.displayName ?? editor.email) : undefined }
           : b
       ));
+      // Notify assigned editor
+      if (editor && selectedOrgId) {
+        try {
+          await createNotification(selectedOrgId, {
+            type: "editor_assigned",
+            title: "Manuscrito asignado para corrección",
+            message: `Se te ha asignado el manuscrito "${book.title}" para que lo corrijas.`,
+            bookId: book.id,
+            bookTitle: book.title,
+            recipientId: editor.uid,
+            organizationId: selectedOrgId,
+            read: false,
+          });
+        } catch { /* non-critical */ }
+      }
     } catch (err) {
       console.error("Error asignando corrector:", err);
       alert("No se pudo asignar el corrector.");
@@ -384,7 +400,21 @@ export default function BooksPage() {
           const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
           createdBookId = await createBook(selectedOrgId, effectiveAuthorId, newTitle.trim(), downloadURL, selectedFile!.name);
           const ok = await triggerIngestion(createdBookId, selectedOrgId, downloadURL, effectiveAuthorId);
-          if (ok) await updateBookStatus(selectedOrgId, createdBookId, "processing");
+          if (ok) {
+            await updateBookStatus(selectedOrgId, createdBookId, "processing");
+            // Notify Responsables Editoriales
+            try {
+              await notifyResponsables(selectedOrgId, {
+                type: "manuscript_uploaded",
+                title: "Nuevo manuscrito subido",
+                message: `${user!.displayName ?? user!.email} ha subido "${newTitle.trim()}" para revisión.`,
+                bookId: createdBookId,
+                bookTitle: newTitle.trim(),
+                organizationId: selectedOrgId,
+                read: false,
+              });
+            } catch { /* non-critical */ }
+          }
 
           const fetchedBooks = isAuthor
             ? (await getBooksByOrganization(selectedOrgId)).filter(b => b.authorId === user!.uid)
@@ -401,6 +431,21 @@ export default function BooksPage() {
           setIsSubmitting(false);
 
           if (!ok) {
+            // Notify Author of failed processing
+            try {
+              if (organizationId && user) {
+                await createNotification(organizationId, {
+                  type: "upload_failed",
+                  title: "Error en el análisis del manuscrito",
+                  message: `No se pudo analizar "${newTitle.trim()}". Usa el botón "Reintentar análisis" cuando el servidor esté disponible.`,
+                  bookId: createdBookId,
+                  bookTitle: newTitle.trim(),
+                  recipientId: user.uid,
+                  organizationId: organizationId,
+                  read: false,
+                });
+              }
+            } catch { /* non-critical */ }
             alert(
               "El manuscrito se subió correctamente, pero el servidor de análisis no está disponible.\n" +
               "Puedes volver a intentarlo más tarde con el botón \"Reintentar análisis\"."

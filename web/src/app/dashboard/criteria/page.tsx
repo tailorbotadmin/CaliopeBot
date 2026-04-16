@@ -132,8 +132,7 @@ export default function CriteriaPage() {
     getDocs(collection(db, "organizations", orgId, "rules")).then(snap => {
       const hasRAE = snap.docs.some(d => d.data().source === "RAE");
       if (!hasRAE) {
-        // Auto-seed silently
-        seedRAERules(orgId);
+        seedRAERules(orgId, true); // silent: no error banner if worker unavailable
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -152,28 +151,35 @@ export default function CriteriaPage() {
   const getRuleName = (rule: Criterion) => rule.name ?? rule.rule ?? "Regla sin nombre";
 
   // ---- Internal seed helper (called programmatically or from button) ----
-  const seedRAERules = async (targetOrgId: string) => {
-    setIsSeeding(true);
-    setSeedResult(null);
+  // silent=true: auto-seed on org switch (no error banner if worker unavailable)
+  // silent=false: user clicked "Reglas RAE" button (show result banner)
+  const seedRAERules = async (targetOrgId: string, silent = false) => {
+    if (!silent) setIsSeeding(true);
+    if (!silent) setSeedResult(null);
     try {
       const { auth: firebaseAuth } = await import("@/lib/firebase");
       const token = await firebaseAuth.currentUser?.getIdToken();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
       const res = await fetch(`${API_URL}/api/v1/seed-rae-rules`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ organizationId: targetOrgId }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail ?? "Error en seed");
-      setSeedResult(
+      if (!silent) setSeedResult(
         data.inserted > 0
           ? `✓ ${data.inserted} reglas RAE añadidas${data.skipped > 0 ? ` (${data.skipped} ya existían)` : ""}.`
           : `Sin cambios: las ${data.skipped} reglas RAE ya estaban cargadas.`
       );
     } catch (err) {
-      setSeedResult("✕ Error: " + (err instanceof Error ? err.message : String(err)));
+      if (!silent) setSeedResult("✕ Error: " + (err instanceof Error ? err.message : String(err)));
+      else console.debug("Auto-seed RAE (silent):", err instanceof Error ? err.message : err);
     } finally {
-      setIsSeeding(false);
+      if (!silent) setIsSeeding(false);
     }
   };
 

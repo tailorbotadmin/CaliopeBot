@@ -266,16 +266,24 @@ async def process_book_background(org_id: str, book_id: str, author_id: str):
             db.collection("organizations").document(org_id)
             .collection("books").document(book_id).collection("chunks")
         )
-        chunks = chunks_ref.order_by("order").limit(settings.MAX_CHUNKS_PER_BATCH).stream()
+        book_ref = (
+            db.collection("organizations").document(org_id)
+            .collection("books").document(book_id)
+        )
 
-        batch = db.batch()
+        # Fetch ALL pending chunks (no limit — process the whole manuscript)
+        all_chunks = list(chunks_ref.order_by("order").stream())
+        pending = [c for c in all_chunks if c.to_dict().get("status") == "pending"]
+
+        if not pending:
+            logger.warning(f"No pending chunks found for book={book_id}. Already processed or empty.")
+            book_ref.update({"status": "review_editor", "processedChunks": 0})
+            return
+
         processed_count = 0
 
-        for chunk in chunks:
+        for chunk in pending:
             data = chunk.to_dict()
-            if data.get("status") != "pending":
-                continue
-
             text = data["text"]
 
             # 1. LanguageTool
@@ -308,24 +316,21 @@ async def process_book_background(org_id: str, book_id: str, author_id: str):
             for s in suggestions:
                 s.setdefault("status", "pending")
 
-            batch.update(chunks_ref.document(chunk.id), {
+            # ── Commit THIS chunk immediately so the editor unlocks progressively ──
+            chunks_ref.document(chunk.id).update({
                 "status": "processed",
                 "suggestions": suggestions,
             })
             processed_count += 1
 
-        if processed_count > 0:
-            batch.commit()
-        else:
-            logger.warning(f"No pending chunks found for book={book_id}. Already processed or empty.")
+            # Update progress counter on the book doc after each chunk
+            book_ref.update({"processedChunks": processed_count})
+            logger.info(f"book={book_id}: chunk {processed_count}/{len(pending)} done")
 
-        # Update book status — always runs even if processed_count == 0
-        book_ref = (
-            db.collection("organizations").document(org_id)
-            .collection("books").document(book_id)
-        )
+        # Mark book as ready for editor review
         book_ref.update({"status": "review_editor", "processedChunks": processed_count})
         logger.info(f"Background done: book={book_id}, processed={processed_count}")
+
 
     except Exception as e:
         logger.error(f"Background task error for book={book_id}: {e}", exc_info=True)

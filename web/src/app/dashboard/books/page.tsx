@@ -21,7 +21,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }
   review_author:       { label: "Revisión Autor",      color: "#06b6d4",            bg: "rgba(6,182,212,0.12)" },
   review_responsable:  { label: "Aprobación Final",    color: "#a855f7",            bg: "rgba(168,85,247,0.12)" },
   approved:            { label: "Aprobado",            color: "var(--success)",     bg: "rgba(16,185,129,0.12)" },
-  error:               { label: "Error en análisis",  color: "#ef4444",            bg: "rgba(239,68,68,0.12)" },
+  error:               { label: "Error",              color: "#ef4444",            bg: "rgba(239,68,68,0.12)" },
 };
 
 export default function BooksPage() {
@@ -144,30 +144,39 @@ export default function BooksPage() {
   // ---- Delete book ----
   const handleDeleteBook = async (book: Book) => {
     if (!book.id || !selectedOrgId) return;
-    if (!confirm(`¿Eliminar el manuscrito "${book.title}" permanentemente?\nEsta acción no se puede deshacer.`)) return;
+    // Warn about losing edits and ask confirmation
+    const confirmed = window.confirm(
+      `¿Eliminar el manuscrito «${book.title}» permanentemente?\n\n` +
+      `⚠️ ATENCIÓN: Se perderán todas las ediciones, correcciones y sugerencias guardadas.\n\n` +
+      `Esta acción no se puede deshacer.`
+    );
+    if (!confirmed) return;
     setDeletingId(book.id);
     try {
-      // Delete Firestore chunks subcollection then the book doc
+      // 1. Delete all chunks (subcollection)
       const chunksRef = collection(db, "organizations", selectedOrgId, "books", book.id, "chunks");
       const chunksSnap = await getDocs(chunksRef);
       const delChunks = chunksSnap.docs.map(d => deleteDoc(d.ref));
       await Promise.all(delChunks);
+
+      // 2. Delete the book document
       await deleteDoc(doc(db, "organizations", selectedOrgId, "books", book.id));
 
-      // Try to delete the Storage file (best-effort)
+      // 3. Try to delete the Storage file (best-effort)
       if (book.fileUrl) {
         try {
           const fileRef = ref(storage, book.fileUrl);
           await deleteObject(fileRef);
         } catch {
-          // Ignore if already deleted or permission error
+          // Ignore: file may already be deleted or have access restrictions
         }
       }
 
+      // 4. Remove from local state immediately
       setBooks(prev => prev.filter(b => b.id !== book.id));
     } catch (err) {
       console.error("Error eliminando manuscrito:", err);
-      alert("No se pudo eliminar el manuscrito.");
+      alert("No se pudo eliminar el manuscrito: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setDeletingId(null);
     }
@@ -410,7 +419,7 @@ export default function BooksPage() {
                   )}
                   {book.status === 'error' && (
                     <p style={{ fontSize: "0.68rem", color: "#ef4444", marginTop: "0.25rem", paddingLeft: "1.4rem" }}>
-                      Error en el análisis — usa Reintentar
+                      Error en la edición — usa Reintentar
                     </p>
                   )}
                 </div>

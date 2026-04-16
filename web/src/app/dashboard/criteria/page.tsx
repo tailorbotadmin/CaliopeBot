@@ -4,14 +4,15 @@ import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/lib/auth-context";
 import {
   Scale, CheckCircle2, XCircle, FilePlus2, Lightbulb,
-  BookOpen, CheckCheck, PenLine, Trash2, Plus, Download, X,
+  BookOpen, CheckCheck, PenLine, Trash2, Plus, Download, X, Building2,
 } from "lucide-react";
 import {
   collection, onSnapshot, doc, setDoc, deleteDoc,
-  writeBatch, updateDoc,
+  writeBatch, updateDoc, getDocs,
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
+import { getOrganizations, Organization } from "@/lib/firestore";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from "docx";
 import { saveAs } from "file-saver";
 
@@ -60,6 +61,13 @@ export default function CriteriaPage() {
   const [activeRules, setActiveRules] = useState<Criterion[]>([]);
   const [pendingRules, setPendingRules] = useState<Criterion[]>([]);
 
+  // SuperAdmin: org selector
+  const [orgs, setOrgs] = useState<Organization[]>([]);
+  const [selectedOrgId, setSelectedOrgId] = useState<string>("");
+
+  // The org whose rules we are viewing
+  const orgId = role === "SuperAdmin" ? selectedOrgId : (organizationId ?? "");
+
   // Filters
   const [pendingFilter, setPendingFilter] = useState<Category>("all");
   const [activeFilter, setActiveFilter] = useState<Category>("all");
@@ -73,7 +81,7 @@ export default function CriteriaPage() {
 
   // Manual rule modal (create / edit)
   const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
-  const [editingRule, setEditingRule] = useState<Criterion | null>(null); // null = create mode
+  const [editingRule, setEditingRule] = useState<Criterion | null>(null);
   const [ruleForm, setRuleForm] = useState<RuleFormData>(EMPTY_FORM);
   const [isSavingRule, setIsSavingRule] = useState(false);
   const [ruleError, setRuleError] = useState("");
@@ -86,21 +94,50 @@ export default function CriteriaPage() {
 
   const canManage = role === "SuperAdmin" || role === "Admin" || role === "Responsable_Editorial";
 
+  // Load orgs for SuperAdmin
   useEffect(() => {
-    if (!organizationId) return;
+    if (role !== "SuperAdmin") return;
+    getOrganizations().then(list => {
+      setOrgs(list);
+      if (list.length > 0) setSelectedOrgId(list[0].id);
+    });
+  }, [role]);
 
-    const pendingRef = collection(db, "organizations", organizationId, "pendingRules");
+  // Subscribe to rules of the selected/current org
+  useEffect(() => {
+    if (!orgId) return;
+
+    const pendingRef = collection(db, "organizations", orgId, "pendingRules");
     const unsubPending = onSnapshot(pendingRef, (snap) => {
       setPendingRules(snap.docs.map(d => ({ id: d.id, ...d.data() } as Criterion)));
     });
 
-    const activeRef = collection(db, "organizations", organizationId, "rules");
+    const activeRef = collection(db, "organizations", orgId, "rules");
     const unsubActive = onSnapshot(activeRef, (snap) => {
       setActiveRules(snap.docs.map(d => ({ id: d.id, ...d.data() } as Criterion)));
     });
 
     return () => { unsubPending(); unsubActive(); };
-  }, [organizationId]);
+  }, [orgId]);
+
+  // Auto-seed RAE rules for Biblioteca Homo Legens if empty
+  useEffect(() => {
+    if (!orgId || role !== "SuperAdmin") return;
+    const selectedOrg = orgs.find(o => o.id === orgId);
+    if (!selectedOrg) return;
+    const isBHL = selectedOrg.name.toLowerCase().includes("homo legens") ||
+                  selectedOrg.name.toLowerCase().includes("biblioteca");
+    if (!isBHL) return;
+    // Check if RAE rules already exist
+    getDocs(collection(db, "organizations", orgId, "rules")).then(snap => {
+      const hasRAE = snap.docs.some(d => d.data().source === "RAE");
+      if (!hasRAE) {
+        // Auto-seed silently
+        seedRAERules(orgId);
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId, orgs]);
 
   const filteredPending = useMemo(() =>
     pendingFilter === "all" ? pendingRules : pendingRules.filter(r => r.category === pendingFilter),
@@ -114,10 +151,8 @@ export default function CriteriaPage() {
 
   const getRuleName = (rule: Criterion) => rule.name ?? rule.rule ?? "Regla sin nombre";
 
-  // ---- Seed RAE rules ----
-  const handleSeedRAE = async () => {
-    if (!organizationId) return;
-    if (!confirm(`¿Cargar las reglas canónicas RAE (Ortografía 2010 + DPD) en el manual de estilo? Las reglas ya existentes no se duplicarán.`)) return;
+  // ---- Internal seed helper (called programmatically or from button) ----
+  const seedRAERules = async (targetOrgId: string) => {
     setIsSeeding(true);
     setSeedResult(null);
     try {
@@ -126,7 +161,7 @@ export default function CriteriaPage() {
       const res = await fetch(`${API_URL}/api/v1/seed-rae-rules`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ organizationId }),
+        body: JSON.stringify({ organizationId: targetOrgId }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail ?? "Error en seed");
@@ -142,12 +177,19 @@ export default function CriteriaPage() {
     }
   };
 
+  // ---- Seed RAE rules (button click) ----
+  const handleSeedRAE = async () => {
+    if (!orgId) return;
+    if (!confirm(`¿Cargar las reglas canónicas RAE (Ortografía 2010 + DPD) en el manual de estilo? Las reglas ya existentes no se duplicarán.`)) return;
+    await seedRAERules(orgId);
+  };
+
   // ---- Approve pending rule ----
   const handleAction = async (rule: Criterion, action: "approved" | "rejected") => {
-    if (!organizationId) return;
+    if (!orgId) return;
     try {
       if (action === "approved") {
-        await setDoc(doc(db, "organizations", organizationId, "rules", rule.id), {
+        await setDoc(doc(db, "organizations", orgId, "rules", rule.id), {
           name: getRuleName(rule),
           rule: getRuleName(rule),
           description: rule.description,
@@ -156,7 +198,7 @@ export default function CriteriaPage() {
           status: "active",
         });
       }
-      await deleteDoc(doc(db, "organizations", organizationId, "pendingRules", rule.id));
+      await deleteDoc(doc(db, "organizations", orgId, "pendingRules", rule.id));
     } catch (error) {
       console.error("Error updating rule:", error);
       alert("Error al actualizar la regla.");
@@ -164,17 +206,17 @@ export default function CriteriaPage() {
   };
 
   const handleApproveAll = async () => {
-    if (!organizationId || filteredPending.length === 0) return;
+    if (!orgId || filteredPending.length === 0) return;
     setApprovingAll(true);
     try {
       const batch = writeBatch(db);
       for (const rule of filteredPending) {
-        batch.set(doc(db, "organizations", organizationId, "rules", rule.id), {
+        batch.set(doc(db, "organizations", orgId, "rules", rule.id), {
           name: getRuleName(rule), rule: getRuleName(rule),
           description: rule.description, category: rule.category ?? "style",
           source: rule.source ?? null, status: "active",
         });
-        batch.delete(doc(db, "organizations", organizationId, "pendingRules", rule.id));
+        batch.delete(doc(db, "organizations", orgId, "pendingRules", rule.id));
       }
       await batch.commit();
     } catch (err) {
@@ -249,7 +291,7 @@ export default function CriteriaPage() {
       setRuleError("El nombre y la descripción son obligatorios.");
       return;
     }
-    if (!organizationId) return;
+    if (!orgId) return;
     setIsSavingRule(true);
     try {
       const ruleData = {
@@ -262,11 +304,9 @@ export default function CriteriaPage() {
       };
 
       if (editingRule) {
-        // Edit existing
-        await updateDoc(doc(db, "organizations", organizationId, "rules", editingRule.id), ruleData);
+        await updateDoc(doc(db, "organizations", orgId, "rules", editingRule.id), ruleData);
       } else {
-        // Create new with auto-id
-        const newRef = doc(collection(db, "organizations", organizationId, "rules"));
+        const newRef = doc(collection(db, "organizations", orgId, "rules"));
         await setDoc(newRef, ruleData);
       }
       setIsRuleModalOpen(false);
@@ -279,9 +319,9 @@ export default function CriteriaPage() {
 
   const handleDeleteRule = async (rule: Criterion) => {
     if (!confirm(`¿Eliminar la regla "${getRuleName(rule)}"? Esta acción no se puede deshacer.`)) return;
-    if (!organizationId) return;
+    if (!orgId) return;
     try {
-      await deleteDoc(doc(db, "organizations", organizationId, "rules", rule.id));
+      await deleteDoc(doc(db, "organizations", orgId, "rules", rule.id));
     } catch (err) {
       alert("Error al eliminar: " + (err instanceof Error ? err.message : String(err)));
     }
@@ -393,7 +433,7 @@ export default function CriteriaPage() {
           <h1>Criterios Editoriales</h1>
           <p>
             Gestiona las normas gramaticales, ortotipográficas y de estilo de{" "}
-            {role === "SuperAdmin" ? "las organizaciones" : "tu editorial"}.
+            {role === "SuperAdmin" ? "las editoriales" : "tu editorial"}.
           </p>
         </div>
         {canManage && (
@@ -403,7 +443,7 @@ export default function CriteriaPage() {
                 className="btn btn-secondary"
                 style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.875rem" }}
                 onClick={handleSeedRAE}
-                disabled={isSeeding}
+                disabled={isSeeding || !orgId}
                 title="Cargar las 30+ reglas canónicas RAE/Fundéu en el manual de estilo"
               >
                 {isSeeding ? "Cargando..." : "📚 Reglas RAE"}
@@ -434,6 +474,27 @@ export default function CriteriaPage() {
           </div>
         )}
       </div>
+
+      {/* Editorial selector for SuperAdmin */}
+      {role === "SuperAdmin" && orgs.length > 0 && (
+        <div className="card-static" style={{ marginBottom: "1.5rem", padding: "1rem 1.25rem", display: "flex", alignItems: "center", gap: "1rem" }}>
+          <Building2 size={16} style={{ color: "var(--primary)", flexShrink: 0 }} />
+          <label style={{ fontWeight: 600, fontSize: "0.875rem", color: "var(--text-main)", whiteSpace: "nowrap" }}>Editorial:</label>
+          <select
+            className="input"
+            value={selectedOrgId}
+            onChange={e => { setSelectedOrgId(e.target.value); setSeedResult(null); }}
+            style={{ maxWidth: "320px" }}
+          >
+            {orgs.map(org => (
+              <option key={org.id} value={org.id}>{org.name}</option>
+            ))}
+          </select>
+          <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
+            {activeRules.length} regla{activeRules.length !== 1 ? "s" : ""} activa{activeRules.length !== 1 ? "s" : ""}
+          </span>
+        </div>
+      )}
 
       {/* Seed RAE result banner */}
       {seedResult && (

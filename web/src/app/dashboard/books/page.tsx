@@ -68,14 +68,14 @@ export default function BooksPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isAdmin = ADMIN_ROLES.includes(role ?? "");
-  const isAuthor = role === "Autor" || role === "Traductor";
+  const isAuthor = role === "Autor";
 
   // Load authors (Autor/Traductor) for the selected org
   const loadAuthors = useCallback(async (orgId: string) => {
     if (!isAdmin) return;
     try {
       const users = await getOrgUsers(orgId);
-      setOrgAuthors(users.filter(u => u.role === "Autor" || u.role === "Traductor"));
+      setOrgAuthors(users.filter(u => u.role === "Autor"));
       // Also load editors for assignment
       setOrgEditors(users.filter(u => u.role === "Editor" || u.role === "Responsable_Editorial"));
     } catch {

@@ -6,7 +6,7 @@ import { Building2, Users, UserPlus, ChevronDown, ChevronUp, Loader2, X, Shield,
 import { getOrganizations, createOrganization, getOrgUsers, Organization, UserProfile, Role } from "@/lib/firestore";
 import { useRouter } from "next/navigation";
 
-const ROLES: Role[] = ["Responsable_Editorial", "Editor", "Autor", "Traductor"];
+const ROLES: Role[] = ["Responsable_Editorial", "Editor", "Autor"];
 
 const ROLE_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
   SuperAdmin:            { label: "SuperAdmin",          color: "#a855f7", bg: "rgba(168,85,247,0.1)" },

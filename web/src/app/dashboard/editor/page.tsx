@@ -115,13 +115,13 @@ export default function EditorPage() {
     if (!bookId || !organizationId) return;
     let nextStatus = "review_author";
     if (role === "Editor") nextStatus = "review_author";
-    else if (role === "Autor" || role === "Traductor") nextStatus = "review_responsable";
+    else if (role === "Autor") nextStatus = "review_responsable";
     else if (role === "Responsable_Editorial" || role === "SuperAdmin") nextStatus = "approved";
 
     try {
       await updateBookStatus(organizationId, bookId, nextStatus);
       // Notify Responsables if Editor or Autor finishes their phase
-      if ((role === "Editor" || role === "Autor" || role === "Traductor") && organizationId) {
+      if ((role === "Editor" || role === "Autor") && organizationId) {
         try {
           const bookTitleEl = document.querySelector("h1");
           const bookTitle = bookTitleEl?.textContent ?? bookId ?? "";
@@ -242,7 +242,7 @@ export default function EditorPage() {
   const canManageSuggestions = () => {
     if (!role) return false;
     if (["SuperAdmin", "Responsable_Editorial", "Editor"].includes(role)) return true;
-    if (["Autor", "Traductor"].includes(role)) {
+    if (["Autor"].includes(role)) {
       return ["review_author", "review_responsable", "approved"].includes(bookStatus);
     }
     return false;

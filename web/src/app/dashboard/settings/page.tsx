@@ -14,7 +14,6 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const ROLES: { value: Role; label: string }[] = [
   { value: "Responsable_Editorial", label: "Responsable Editorial" },
   { value: "Editor",                label: "Editor" },
-  { value: "Traductor",             label: "Traductor" },
   { value: "Autor",                 label: "Autor" },
 ];
 
@@ -49,7 +48,7 @@ export default function SettingsPage() {
       const users = await getOrgUsers(organizationId);
       // Put current user first, then sort by role weight
       const roleWeight: Record<string, number> = {
-        SuperAdmin: 0, Admin: 1, Responsable_Editorial: 1, Editor: 2, Traductor: 3, Autor: 4,
+        SuperAdmin: 0, Admin: 1, Responsable_Editorial: 1, Editor: 2, Autor: 3,
       };
       users.sort((a, b) => (roleWeight[a.role] ?? 9) - (roleWeight[b.role] ?? 9));
       setMembers(users);
@@ -212,7 +211,6 @@ export default function SettingsPage() {
     Admin: "var(--primary)",
     Responsable_Editorial: "var(--primary)",
     Editor: "#10b981",
-    Traductor: "#06b6d4",
     Autor: "var(--text-muted)",
   };
 

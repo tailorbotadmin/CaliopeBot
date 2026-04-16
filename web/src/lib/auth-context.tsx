@@ -4,7 +4,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { User, onAuthStateChanged, getIdTokenResult } from "firebase/auth";
 import { auth } from "./firebase";
 
-export type Role = "SuperAdmin" | "Admin" | "Responsable_Editorial" | "Editor" | "Autor" | "Traductor";
+export type Role = "SuperAdmin" | "Admin" | "Responsable_Editorial" | "Editor" | "Autor" ;
 
 interface ImpersonatedProfile {
   uid: string;

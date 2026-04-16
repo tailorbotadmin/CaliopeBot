@@ -572,12 +572,12 @@ async def update_user_role(request: UpdateRoleRequest, raw_req: Request):
         decoded_token = firebase_auth.verify_id_token(token)
 
         caller_role = decoded_token.get("role", "")
-        if caller_role not in ["Admin", "SuperAdmin"]:
+        if caller_role not in ["Admin", "SuperAdmin", "Responsable_Editorial"]:
             raise HTTPException(status_code=403, detail="Forbidden, insufficient permissions")
 
-        # Admins cannot promote to Admin or SuperAdmin
-        if caller_role == "Admin" and request.role in ["Admin", "SuperAdmin"]:
-            raise HTTPException(status_code=403, detail="Admins cannot assign Admin or SuperAdmin roles")
+        # Responsable_Editorial cannot promote to SuperAdmin
+        if caller_role in ["Admin", "Responsable_Editorial"] and request.role in ["Admin", "SuperAdmin"]:
+            raise HTTPException(status_code=403, detail="No tienes permisos para asignar ese rol")
 
         # Get target user's current org to prevent cross-org attacks
         target_user = db.collection("users").document(request.targetUid).get()
@@ -619,8 +619,8 @@ async def create_user_endpoint(request: CreateUserRequest, raw_req: Request):
         from firebase_admin import auth as firebase_auth
         decoded_token = firebase_auth.verify_id_token(token)
         
-        # Only Admins and SuperAdmins can create users
-        if decoded_token.get("role") not in ["Admin", "SuperAdmin"]:
+        # Only Responsable_Editorial, and SuperAdmins can create users
+        if decoded_token.get("role") not in ["Admin", "SuperAdmin", "Responsable_Editorial"]:
             raise HTTPException(status_code=403, detail="Forbidden, insufficient permissions")
             
         # Security: You can't create users outside your assigned org unless you are SuperAdmin
@@ -673,26 +673,16 @@ async def delete_user(request: DeleteUserRequest, raw_req: Request):
         decoded_token = firebase_auth.verify_id_token(token)
         caller_role = decoded_token.get("role", "")
 
-        if caller_role not in ["Admin", "SuperAdmin"]:
+        if caller_role not in ["Admin", "SuperAdmin", "Responsable_Editorial"]:
             raise HTTPException(status_code=403, detail="Forbidden, insufficient permissions")
-
-        # Fetch target user to enforce cross-org and self-delete protections
-        target_doc = db.collection("users").document(request.targetUid).get()
-        if not target_doc.exists:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        target_data = target_doc.to_dict()
-        target_role = target_data.get("role", "")
-        target_org = target_data.get("organizationId")
-        caller_org = decoded_token.get("organizationId")
 
         # Prevent cross-org deletion (except SuperAdmin)
         if caller_role != "SuperAdmin" and target_org != caller_org:
             raise HTTPException(status_code=403, detail="Cannot delete users outside your organization")
 
-        # Admins cannot delete other Admins or SuperAdmins
-        if caller_role == "Admin" and target_role in ["Admin", "SuperAdmin"]:
-            raise HTTPException(status_code=403, detail="Admins cannot delete Admin or SuperAdmin users")
+        # Responsable_Editorial cannot delete SuperAdmins
+        if caller_role in ["Admin", "Responsable_Editorial"] and target_role in ["Admin", "SuperAdmin", "Responsable_Editorial"]:
+            raise HTTPException(status_code=403, detail="No tienes permisos para eliminar ese usuario")
 
         # Prevent self-deletion
         if request.targetUid == decoded_token.get("uid"):

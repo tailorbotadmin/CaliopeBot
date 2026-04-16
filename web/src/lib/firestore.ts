@@ -16,7 +16,7 @@ import {
 
 import { db } from './firebase';
 
-export type Role = 'SuperAdmin' | 'Responsable_Editorial' | 'Editor' | 'Autor' | 'Traductor';
+export type Role = 'SuperAdmin' | 'Responsable_Editorial' | 'Editor' | 'Autor';
 
 
 // Firestore timestamps come back as Timestamp on read, but we write with serverTimestamp() (FieldValue).

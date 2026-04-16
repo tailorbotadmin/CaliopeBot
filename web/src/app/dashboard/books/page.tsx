@@ -2,8 +2,14 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { getBooksByOrganization, getOrganizations, createBook, updateBookStatus, Book, Organization } from "@/lib/firestore";
-import { FolderOpen, FileText, UploadCloud, CheckCircle2, Clock, Loader2, Download, Unlock, AlertCircle, RefreshCw, Trash2 } from "lucide-react";
+import {
+  getBooksByOrganization, getOrganizations, createBook,
+  updateBookStatus, Book, Organization, getOrgUsers, UserProfile,
+} from "@/lib/firestore";
+import {
+  FolderOpen, FileText, UploadCloud, CheckCircle2, Clock, Loader2,
+  Download, Unlock, AlertCircle, RefreshCw, Trash2, UserCircle2, Plus, X,
+} from "lucide-react";
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { storage, db } from "@/lib/firebase";
 import { collection, query, orderBy, getDocs, doc, deleteDoc } from "firebase/firestore";
@@ -21,28 +27,55 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }
   review_author:       { label: "Revisión Autor",      color: "#06b6d4",            bg: "rgba(6,182,212,0.12)" },
   review_responsable:  { label: "Aprobación Final",    color: "#a855f7",            bg: "rgba(168,85,247,0.12)" },
   approved:            { label: "Aprobado",            color: "var(--success)",     bg: "rgba(16,185,129,0.12)" },
-  error:               { label: "Error",              color: "#ef4444",            bg: "rgba(239,68,68,0.12)" },
+  error:               { label: "Error",               color: "#ef4444",            bg: "rgba(239,68,68,0.12)" },
 };
+
+const ADMIN_ROLES = ["SuperAdmin", "Admin", "Responsable_Editorial"];
 
 export default function BooksPage() {
   const { user, role, organizationId, loading } = useAuth();
-  
+
   const [books, setBooks] = useState<Book[]>([]);
   const [orgs, setOrgs] = useState<Organization[]>([]);
+  const [orgAuthors, setOrgAuthors] = useState<UserProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedOrgId, setSelectedOrgId] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+
+  // Author selection in modal
+  const [selectedAuthorId, setSelectedAuthorId] = useState("");
+  const [newAuthorName, setNewAuthorName] = useState("");
+  const [showAddAuthor, setShowAddAuthor] = useState(false);
+  const [addingAuthor, setAddingAuthor] = useState(false);
+
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [reopeningId, setReopeningId] = useState<string | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  // Delete confirmation modal
+  const [deleteTarget, setDeleteTarget] = useState<Book | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isAdmin = ADMIN_ROLES.includes(role ?? "");
+  const isAuthor = role === "Autor" || role === "Traductor";
+
+  // Load authors for the selected org
+  const loadAuthors = useCallback(async (orgId: string) => {
+    if (!isAdmin) return;
+    try {
+      const users = await getOrgUsers(orgId);
+      setOrgAuthors(users.filter(u => u.role === "Autor" || u.role === "Traductor"));
+    } catch {
+      setOrgAuthors([]);
+    }
+  }, [isAdmin]);
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -54,18 +87,22 @@ export default function BooksPage() {
           const fetchedBooks = await getBooksByOrganization(_orgs[0].id);
           setBooks(fetchedBooks);
           setSelectedOrgId(_orgs[0].id);
+          await loadAuthors(_orgs[0].id);
         }
       } else if (organizationId) {
-        const fetchedBooks = await getBooksByOrganization(organizationId);
+        const fetchedBooks = isAuthor
+          ? (await getBooksByOrganization(organizationId)).filter(b => b.authorId === user!.uid)
+          : await getBooksByOrganization(organizationId);
         setBooks(fetchedBooks);
         setSelectedOrgId(organizationId);
+        await loadAuthors(organizationId);
       }
     } catch (err) {
       console.error("Error al cargar manuscritos", err);
     } finally {
       setIsLoading(false);
     }
-  }, [role, organizationId]);
+  }, [role, organizationId, isAuthor, user, loadAuthors]);
 
   useEffect(() => {
     if (!loading && user) {
@@ -80,11 +117,12 @@ export default function BooksPage() {
       setIsLoading(true);
       const fetchedBooks = await getBooksByOrganization(orgId);
       setBooks(fetchedBooks);
+      await loadAuthors(orgId);
       setIsLoading(false);
     }
   };
 
-  // ---- Download edited .docx from library ----
+  // ---- Download edited .docx ----
   const handleDownloadEditedDocx = async (book: Book) => {
     if (!book.id || !selectedOrgId) return;
     setDownloadingId(book.id);
@@ -93,32 +131,30 @@ export default function BooksPage() {
       const q = query(chunksRef, orderBy("order", "asc"));
       const snap = await getDocs(q);
 
-      const docChildren = snap.docs.map(d => {
+      const paragraphs: Paragraph[] = [];
+      snap.docs.forEach(d => {
         const data = d.data();
-        let text: string = data.text ?? "";
-        const suggestions = (data.suggestions ?? []) as Array<{
-          status: string; originalText: string; correctedText: string;
-        }>;
-        suggestions.forEach(s => {
-          if (s.status !== "rejected") {
-            text = text.replace(s.originalText, s.correctedText);
-          }
-        });
-        return new Paragraph({
-          children: [new TextRun(text)],
+        const text = data.text ?? "";
+        const suggestions: { originalText: string; correctedText: string; status: string }[] =
+          data.suggestions ?? [];
+        let final = text;
+        suggestions
+          .filter(s => s.status === "accepted")
+          .sort((a, b) => b.originalText.length - a.originalText.length)
+          .forEach(s => { final = final.replaceAll(s.originalText, s.correctedText); });
+
+        paragraphs.push(new Paragraph({
+          children: [new TextRun({ text: final, size: 24, font: "Times New Roman" })],
           spacing: { after: 200 },
-        });
+        }));
       });
 
-      const wordDoc = new Document({
-        sections: [{ properties: {}, children: docChildren }],
-      });
-      const blob = await Packer.toBlob(wordDoc);
-      const safeTitle = book.title.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ _-]/g, "");
-      saveAs(blob, `${safeTitle}_Editado.docx`);
+      const doc2 = new Document({ sections: [{ properties: {}, children: paragraphs }] });
+      const blob = await Packer.toBlob(doc2);
+      saveAs(blob, `${book.title.replace(/\s+/g, "_")}_editado.docx`);
     } catch (err) {
-      console.error("Error generando descarga:", err);
-      alert("Error al generar el documento editado.");
+      console.error("Error descargando:", err);
+      alert("Error generando el documento editado.");
     } finally {
       setDownloadingId(null);
     }
@@ -126,7 +162,6 @@ export default function BooksPage() {
 
   // ---- Reopen editing ----
   const handleReopenEditing = async (book: Book) => {
-    if (!confirm(`¿Reabrir la edición de "${book.title}"? El manuscrito volverá al estado de Revisión Editor.`)) return;
     if (!book.id || !selectedOrgId) return;
     setReopeningId(book.id);
     try {
@@ -141,16 +176,12 @@ export default function BooksPage() {
     }
   };
 
-  // ---- Delete book ----
+  // ---- Delete book (with confirmation modal) ----
   const handleDeleteBook = async (book: Book) => {
-    if (!book.id || !selectedOrgId) return;
-    // Warn about losing edits and ask confirmation
-    const confirmed = window.confirm(
-      `¿Eliminar el manuscrito «${book.title}» permanentemente?\n\n` +
-      `⚠️ ATENCIÓN: Se perderán todas las ediciones, correcciones y sugerencias guardadas.\n\n` +
-      `Esta acción no se puede deshacer.`
-    );
-    if (!confirmed) return;
+    if (!book.id || !selectedOrgId) {
+      alert("Error: no hay organización seleccionada.");
+      return;
+    }
     setDeletingId(book.id);
     try {
       // 1. Delete all chunks (subcollection)
@@ -162,18 +193,24 @@ export default function BooksPage() {
       // 2. Delete the book document
       await deleteDoc(doc(db, "organizations", selectedOrgId, "books", book.id));
 
-      // 3. Try to delete the Storage file (best-effort)
+      // 3. Try to delete the Storage file (best-effort — extract path from URL)
       if (book.fileUrl) {
         try {
-          const fileRef = ref(storage, book.fileUrl);
-          await deleteObject(fileRef);
+          // Firebase Storage URLs contain the path after /o/
+          const pathMatch = book.fileUrl.match(/\/o\/(.+?)(\?|$)/);
+          if (pathMatch) {
+            const storagePath = decodeURIComponent(pathMatch[1]);
+            const fileRef = ref(storage, storagePath);
+            await deleteObject(fileRef);
+          }
         } catch {
-          // Ignore: file may already be deleted or have access restrictions
+          // Ignore — file may already be deleted or inaccessible
         }
       }
 
-      // 4. Remove from local state immediately
+      // 4. Remove from local state
       setBooks(prev => prev.filter(b => b.id !== book.id));
+      setDeleteTarget(null);
     } catch (err) {
       console.error("Error eliminando manuscrito:", err);
       alert("No se pudo eliminar el manuscrito: " + (err instanceof Error ? err.message : String(err)));
@@ -182,15 +219,14 @@ export default function BooksPage() {
     }
   };
 
-  // ---- Trigger or re-trigger AI Worker ingestion ----
+  // ---- Trigger AI Worker ----
   const triggerIngestion = async (bookId: string, orgId: string, fileUrl: string, authorId: string): Promise<boolean> => {
     try {
-      // 60s timeout: Cloud Run cold starts can take 15-30s
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000);
       const res = await fetch(`${API_URL}/api/v1/ingest-book`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ bookId, organizationId: orgId, fileUrl, authorId }),
         signal: controller.signal,
       });
@@ -203,13 +239,12 @@ export default function BooksPage() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("AI Worker error:", msg);
-      // Mark book as error so the user sees it and can retry
       await updateBookStatus(orgId, bookId, "error", msg);
       return false;
     }
   };
 
-  // ---- Retry analysis for a stuck/errored book ----
+  // ---- Retry analysis ----
   const handleRetryIngestion = async (book: Book) => {
     if (!book.id || !book.fileUrl || !selectedOrgId) return;
     if (!confirm(`¿Reintentar el análisis de "${book.title}"?`)) return;
@@ -218,15 +253,52 @@ export default function BooksPage() {
       await updateBookStatus(selectedOrgId, book.id, "processing", "");
       const ok = await triggerIngestion(book.id, selectedOrgId, book.fileUrl, book.authorId);
       if (ok) {
-        // Worker accepted — update to processing (worker will set review_editor when done)
-        await updateBookStatus(selectedOrgId, book.id, "processing");
+        const fetchedBooks = await getBooksByOrganization(selectedOrgId);
+        setBooks(fetchedBooks);
       }
-      const fetchedBooks = await getBooksByOrganization(selectedOrgId);
-      setBooks(fetchedBooks);
     } catch (err) {
       console.error("Error reintentando:", err);
     } finally {
       setRetryingId(null);
+    }
+  };
+
+  // ---- Add new author ----
+  const handleAddAuthor = async () => {
+    if (!newAuthorName.trim() || !selectedOrgId) return;
+    setAddingAuthor(true);
+    try {
+      const res = await fetch(`${API_URL}/api/v1/users/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          displayName: newAuthorName.trim(),
+          role: "Autor",
+          organizationId: selectedOrgId,
+          createdBy: user?.uid,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const newAuthor: UserProfile = {
+          uid: data.uid ?? `temp_${Date.now()}`,
+          email: data.email ?? "",
+          displayName: newAuthorName.trim(),
+          role: "Autor",
+          organizationId: selectedOrgId,
+          createdAt: new Date() as never,
+        };
+        setOrgAuthors(prev => [...prev, newAuthor]);
+        setSelectedAuthorId(newAuthor.uid);
+        setNewAuthorName("");
+        setShowAddAuthor(false);
+      } else {
+        alert("No se pudo crear el autor. Usa Configuración → Usuarios para añadirlo.");
+      }
+    } catch {
+      alert("Error conectando con el servidor para crear el autor.");
+    } finally {
+      setAddingAuthor(false);
     }
   };
 
@@ -235,76 +307,66 @@ export default function BooksPage() {
       const file = e.target.files[0];
       if (file.name.endsWith(".docx")) {
         setSelectedFile(file);
-        // Auto-fill title if empty
-        if (!newTitle) {
-          setNewTitle(file.name.replace(".docx", ""));
-        }
+        if (!newTitle) setNewTitle(file.name.replace(".docx", ""));
       } else {
         alert("Por favor, selecciona un archivo Word (.docx) válido.");
       }
     }
   };
 
+  const openModal = () => {
+    setIsModalOpen(true);
+    // Pre-select current user if Autor
+    if (isAuthor && user) setSelectedAuthorId(user.uid);
+    else setSelectedAuthorId(orgAuthors[0]?.uid ?? "");
+  };
+
   const handleCreateBook = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTitle.trim()) {
-      alert("Por favor, introduce un título.");
-      return;
-    }
-    if (!selectedFile) {
-      alert("Por favor, selecciona un archivo.");
-      return;
-    }
-    if (!selectedOrgId) {
-      alert("No hay ninguna Organización seleccionada. Debes crear una primero.");
-      return;
-    }
+    if (!newTitle.trim()) { alert("Por favor, introduce un título."); return; }
+    if (!selectedFile) { alert("Por favor, selecciona un archivo."); return; }
+    if (!selectedOrgId) { alert("No hay ninguna Organización seleccionada."); return; }
+
+    // Determine authorId
+    const effectiveAuthorId = isAuthor ? user!.uid : (selectedAuthorId || user!.uid);
+
     setIsSubmitting(true);
     setUploadProgress(0);
-
     let createdBookId: string | null = null;
 
     try {
-      // 1. Upload to Firebase Storage
       const fileId = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
       const storagePath = `organizations/${selectedOrgId}/manuscripts/${fileId}.docx`;
       const storageRef = ref(storage, storagePath);
-      
       const uploadTask = uploadBytesResumable(storageRef, selectedFile);
 
-      uploadTask.on('state_changed', 
+      uploadTask.on("state_changed",
         (snapshot) => {
-          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-          setUploadProgress(progress);
-        }, 
+          setUploadProgress((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+        },
         (error) => {
           console.error("Upload error", error);
           alert("Error subiendo el archivo: " + error.message);
           setIsSubmitting(false);
-        }, 
+        },
         async () => {
-          // 2. Get Download URL
           const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-          
-          // 3. Create Book in Firestore (status: 'draft' until worker confirms)
-          createdBookId = await createBook(selectedOrgId, user!.uid, newTitle.trim(), downloadURL, selectedFile!.name);
-          
-          // 4. Trigger AI Worker — if it fails the book is marked 'error' automatically
-          const ok = await triggerIngestion(createdBookId, selectedOrgId, downloadURL, user!.uid);
-          if (ok) {
-            // Worker confirmed → set processing (worker will later set review_editor)
-            await updateBookStatus(selectedOrgId, createdBookId, "processing");
-          }
-          // If !ok, triggerIngestion already wrote 'error' status
+          createdBookId = await createBook(selectedOrgId, effectiveAuthorId, newTitle.trim(), downloadURL, selectedFile!.name);
+          const ok = await triggerIngestion(createdBookId, selectedOrgId, downloadURL, effectiveAuthorId);
+          if (ok) await updateBookStatus(selectedOrgId, createdBookId, "processing");
 
-          // 5. Refresh & Reset
-          const fetchedBooks = await getBooksByOrganization(selectedOrgId);
+          const fetchedBooks = isAuthor
+            ? (await getBooksByOrganization(selectedOrgId)).filter(b => b.authorId === user!.uid)
+            : await getBooksByOrganization(selectedOrgId);
           setBooks(fetchedBooks);
-          
+
           setIsModalOpen(false);
           setNewTitle("");
           setSelectedFile(null);
           setUploadProgress(0);
+          setSelectedAuthorId("");
+          setNewAuthorName("");
+          setShowAddAuthor(false);
           setIsSubmitting(false);
 
           if (!ok) {
@@ -335,11 +397,10 @@ export default function BooksPage() {
       {/* Header */}
       <div className="page-header">
         <div>
-          <h1>{(role === "Autor" || role === "Traductor") ? "Mis Manuscritos" : "Catálogo de Manuscritos"}</h1>
-          <p>Sube archivos Word (.docx) para que sean ingestados y analizados mediante procesamiento por lotes.</p>
+          <h1>{isAuthor ? "Mis Manuscritos" : "Catálogo de Manuscritos"}</h1>
+          <p>Sube archivos Word (.docx) para que sean analizados mediante IA editorial.</p>
         </div>
-        
-        <button className="btn" style={{ padding: "0.75rem 1.5rem" }} onClick={() => setIsModalOpen(true)}>
+        <button className="btn" style={{ padding: "0.75rem 1.5rem" }} onClick={openModal}>
           <FolderOpen size={18} style={{ marginRight: "0.5rem", display: "inline-block", verticalAlign: "middle" }} />
           Subir Manuscrito
         </button>
@@ -371,7 +432,7 @@ export default function BooksPage() {
           {/* List header */}
           <div style={{
             display: "grid",
-            gridTemplateColumns: "1fr 140px 120px 100px",
+            gridTemplateColumns: "1fr 140px 120px 160px",
             padding: "0.625rem 1.25rem",
             borderBottom: "1px solid var(--border-color)",
             fontSize: "0.7rem",
@@ -389,15 +450,15 @@ export default function BooksPage() {
           {books.map((book, idx) => {
             const sc = STATUS_CONFIG[book.status] ?? STATUS_CONFIG.draft;
             const dateStr = book.createdAt?.toDate
-              ? book.createdAt.toDate().toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })
-              : '—';
+              ? book.createdAt.toDate().toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" })
+              : "—";
             const isLast = idx === books.length - 1;
             return (
               <div
                 key={book.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1fr 140px 120px 100px",
+                  gridTemplateColumns: "1fr 140px 120px 160px",
                   padding: "0.875rem 1.25rem",
                   alignItems: "center",
                   borderBottom: isLast ? "none" : "1px solid var(--border-color)",
@@ -417,7 +478,7 @@ export default function BooksPage() {
                   {book.fileName && (
                     <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", paddingLeft: "1.4rem" }}>{book.fileName}</span>
                   )}
-                  {book.status === 'error' && (
+                  {book.status === "error" && (
                     <p style={{ fontSize: "0.68rem", color: "#ef4444", marginTop: "0.25rem", paddingLeft: "1.4rem" }}>
                       Error en la edición — usa Reintentar
                     </p>
@@ -432,8 +493,8 @@ export default function BooksPage() {
                     padding: "0.2rem 0.5rem", borderRadius: "99px",
                     backgroundColor: sc.bg, color: sc.color,
                   }}>
-                    {book.status === 'processing' && <Loader2 size={9} style={{ animation: 'spin 1s linear infinite' }} />}
-                    {book.status === 'error' && <AlertCircle size={9} />}
+                    {book.status === "processing" && <Loader2 size={9} style={{ animation: "spin 1s linear infinite" }} />}
+                    {book.status === "error" && <AlertCircle size={9} />}
                     {sc.label}
                   </span>
                 </div>
@@ -446,7 +507,7 @@ export default function BooksPage() {
                 {/* Actions */}
                 <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "0.375rem" }}>
                   {/* Retry */}
-                  {(book.status === 'error' || book.status === 'draft') && book.fileUrl && (
+                  {(book.status === "error" || book.status === "draft") && book.fileUrl && (
                     <button
                       title="Reintentar análisis"
                       className="btn btn-secondary"
@@ -461,19 +522,19 @@ export default function BooksPage() {
                   )}
 
                   {/* Open editor */}
-                  {book.status !== 'error' && book.status !== 'draft' && (
+                  {book.status !== "error" && book.status !== "draft" && (
                     <Link
                       href={`/dashboard/editor?bookId=${book.id}`}
-                      title={book.status === 'approved' ? 'Ver en Editor' : 'Abrir Editor'}
+                      title={book.status === "approved" ? "Ver en Editor" : "Abrir Editor"}
                       className="btn btn-secondary"
                       style={{ padding: "0.3rem 0.6rem", fontSize: "0.78rem", textDecoration: "none", display: "inline-flex", alignItems: "center" }}
                     >
-                      {book.status === 'approved' ? 'Ver' : 'Editar →'}
+                      {book.status === "approved" ? "Ver" : "Editar →"}
                     </Link>
                   )}
 
                   {/* Download edited docx (approved) */}
-                  {book.status === 'approved' && (
+                  {book.status === "approved" && (
                     <button
                       title="Descargar editado"
                       className="btn"
@@ -488,7 +549,7 @@ export default function BooksPage() {
                   )}
 
                   {/* Reopen editing */}
-                  {book.status === 'approved' && (
+                  {book.status === "approved" && (
                     <button
                       title="Reabrir edición"
                       className="btn btn-secondary"
@@ -502,12 +563,12 @@ export default function BooksPage() {
                     </button>
                   )}
 
-                  {/* Delete */}
+                  {/* Delete — triggers confirmation modal */}
                   <button
                     title="Eliminar manuscrito"
                     className="btn btn-secondary"
                     style={{ padding: "0.3rem 0.5rem", fontSize: "0.75rem", display: "flex", alignItems: "center", borderColor: "#ef4444", color: "#ef4444" }}
-                    onClick={() => handleDeleteBook(book)}
+                    onClick={() => setDeleteTarget(book)}
                     disabled={deletingId === book.id}
                   >
                     {deletingId === book.id
@@ -521,32 +582,85 @@ export default function BooksPage() {
         </div>
       )}
 
-      {/* Upload Modal */}
+      {/* ────────────────── DELETE CONFIRMATION MODAL ────────────────── */}
+      {deleteTarget && (
+        <div className="modal-overlay">
+          <div className="card fade-in modal-content" style={{ maxWidth: "440px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "1.25rem" }}>
+              <h2 style={{ fontSize: "1.125rem", fontWeight: 700, color: "var(--text-main)" }}>
+                ¿Eliminar manuscrito?
+              </h2>
+              <button onClick={() => setDeleteTarget(null)} className="btn-ghost" style={{ padding: "0.25rem" }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: "1rem", backgroundColor: "rgba(239,68,68,0.08)", borderRadius: "var(--radius)", marginBottom: "1.25rem", borderLeft: "3px solid #ef4444" }}>
+              <p style={{ fontWeight: 700, color: "var(--text-main)", marginBottom: "0.375rem" }}>
+                «{deleteTarget.title}»
+              </p>
+              <p style={{ fontSize: "0.8rem", color: "#ef4444" }}>
+                ⚠️ Se perderán permanentemente todas las ediciones, correcciones y sugerencias guardadas.
+                Esta acción no se puede deshacer.
+              </p>
+            </div>
+
+            <div style={{ display: "flex", gap: "0.75rem" }}>
+              <button
+                className="btn btn-secondary"
+                style={{ flex: 1 }}
+                onClick={() => setDeleteTarget(null)}
+                disabled={deletingId === deleteTarget.id}
+              >
+                Cancelar
+              </button>
+              <button
+                className="btn"
+                style={{ flex: 1, backgroundColor: "#ef4444", borderColor: "#ef4444" }}
+                onClick={() => handleDeleteBook(deleteTarget)}
+                disabled={deletingId === deleteTarget.id}
+              >
+                {deletingId === deleteTarget.id
+                  ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite", marginRight: "0.375rem" }} />Eliminando...</>
+                  : "Sí, eliminar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ────────────────── UPLOAD MODAL ────────────────── */}
       {isModalOpen && (
         <div className="modal-overlay">
-          <div className="card fade-in modal-content" style={{ maxWidth: "500px" }}>
-            <h2 style={{ fontSize: "1.25rem", fontWeight: 700, marginBottom: "1.5rem", color: "var(--text-main)" }}>Nuevo Manuscrito</h2>
-            
+          <div className="card fade-in modal-content" style={{ maxWidth: "520px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
+              <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--text-main)" }}>Nuevo Manuscrito</h2>
+              <button onClick={() => setIsModalOpen(false)} className="btn-ghost" style={{ padding: "0.25rem" }}>
+                <X size={18} />
+              </button>
+            </div>
+
             <form onSubmit={handleCreateBook}>
+              {/* File drop zone */}
               <div style={{ marginBottom: "1.25rem" }}>
-                <label 
-                  className="card-static" 
-                  style={{ 
-                    cursor: "pointer", 
-                    display: "flex", 
+                <label
+                  className="card-static"
+                  style={{
+                    cursor: "pointer",
+                    display: "flex",
                     flexDirection: "column",
-                    justifyContent: "center", 
-                    alignItems: "center", 
-                    height: "120px", 
+                    justifyContent: "center",
+                    alignItems: "center",
+                    height: "110px",
                     borderStyle: "dashed",
                     borderColor: selectedFile ? "var(--primary)" : "var(--border-color)",
-                    backgroundColor: selectedFile ? "rgba(233, 68, 90, 0.05)" : "var(--bg-color)"
+                    backgroundColor: selectedFile ? "rgba(233, 68, 90, 0.05)" : "var(--bg-color)",
                   }}
                 >
-                  <input 
-                    type="file" 
-                    accept=".docx" 
-                    style={{ display: "none" }} 
+                  <input
+                    type="file"
+                    accept=".docx"
+                    style={{ display: "none" }}
                     ref={fileInputRef}
                     onChange={handleFileChange}
                   />
@@ -560,25 +674,102 @@ export default function BooksPage() {
                     </div>
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem" }}>
-                       <UploadCloud size={24} style={{ color: "var(--text-muted)" }} />
-                       <span style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>Seleccionar archivo Word (.docx)</span>
+                      <UploadCloud size={24} style={{ color: "var(--text-muted)" }} />
+                      <span style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>Seleccionar archivo Word (.docx)</span>
                     </div>
                   )}
                 </label>
               </div>
 
-              <div style={{ marginBottom: "1.75rem" }}>
-                <label style={{ display: "block", marginBottom: "0.375rem", fontWeight: 600, color: "var(--text-main)", fontSize: "0.875rem" }}>Título de la Obra</label>
-                <input 
-                  type="text" 
-                  className="input" 
+              {/* Title */}
+              <div style={{ marginBottom: "1.125rem" }}>
+                <label style={{ display: "block", marginBottom: "0.375rem", fontWeight: 600, color: "var(--text-main)", fontSize: "0.875rem" }}>
+                  Título de la Obra
+                </label>
+                <input
+                  type="text"
+                  className="input"
                   value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
+                  onChange={e => setNewTitle(e.target.value)}
                   placeholder="Ej. Cien años de soledad"
                   required
                 />
               </div>
 
+              {/* Author field */}
+              <div style={{ marginBottom: "1.5rem" }}>
+                <label style={{ display: "block", marginBottom: "0.375rem", fontWeight: 600, color: "var(--text-main)", fontSize: "0.875rem" }}>
+                  <UserCircle2 size={14} style={{ display: "inline", marginRight: "0.3rem", verticalAlign: "middle" }} />
+                  Autor
+                </label>
+
+                {isAuthor ? (
+                  /* For authors: read-only their own name */
+                  <input
+                    type="text"
+                    className="input"
+                    value={user?.displayName ?? user?.email ?? "Mi cuenta"}
+                    disabled
+                    style={{ opacity: 0.7 }}
+                  />
+                ) : (
+                  /* For admins: dropdown of existing authors + add new */
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                      <select
+                        className="input"
+                        value={selectedAuthorId}
+                        onChange={e => setSelectedAuthorId(e.target.value)}
+                        style={{ flex: 1 }}
+                      >
+                        <option value="">— Seleccionar autor —</option>
+                        {orgAuthors.map(a => (
+                          <option key={a.uid} value={a.uid}>
+                            {a.displayName ?? a.email}
+                          </option>
+                        ))}
+                        <option value={user!.uid}>Yo mismo ({user?.displayName ?? user?.email})</option>
+                      </select>
+
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ padding: "0.5rem 0.75rem", display: "flex", alignItems: "center", gap: "0.25rem", whiteSpace: "nowrap" }}
+                          onClick={() => setShowAddAuthor(v => !v)}
+                          title="Añadir nuevo autor"
+                        >
+                          <Plus size={14} /> Añadir
+                        </button>
+                      )}
+                    </div>
+
+                    {showAddAuthor && (
+                      <div style={{ display: "flex", gap: "0.5rem", padding: "0.75rem", backgroundColor: "var(--bg-color)", borderRadius: "var(--radius)", border: "1px solid var(--border-color)" }}>
+                        <input
+                          type="text"
+                          className="input"
+                          placeholder="Nombre del autor"
+                          value={newAuthorName}
+                          onChange={e => setNewAuthorName(e.target.value)}
+                          style={{ flex: 1 }}
+                        />
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{ padding: "0.5rem 0.75rem" }}
+                          onClick={handleAddAuthor}
+                          disabled={addingAuthor || !newAuthorName.trim()}
+                        >
+                          {addingAuthor ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : "Crear"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Upload progress */}
               {isSubmitting && (
                 <div style={{ marginBottom: "1.5rem" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", marginBottom: "0.375rem" }}>
@@ -592,16 +783,21 @@ export default function BooksPage() {
               )}
 
               <div style={{ display: "flex", gap: "0.75rem" }}>
-                <button 
-                  type="button" 
-                  className="btn btn-secondary" 
-                  style={{ flex: 1 }} 
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ flex: 1 }}
                   onClick={() => setIsModalOpen(false)}
                   disabled={isSubmitting}
                 >
                   Cancelar
                 </button>
-                <button type="submit" className="btn" style={{ flex: 1 }} disabled={isSubmitting || !selectedFile || !newTitle.trim()}>
+                <button
+                  type="submit"
+                  className="btn"
+                  style={{ flex: 1 }}
+                  disabled={isSubmitting || !selectedFile || !newTitle.trim()}
+                >
                   {isSubmitting ? "Procesando..." : "Subir Manuscrito"}
                 </button>
               </div>

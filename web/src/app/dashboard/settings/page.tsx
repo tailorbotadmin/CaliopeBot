@@ -4,8 +4,10 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { auth } from "@/lib/firebase";
-import { getOrgUsers, UserProfile, Role } from "@/lib/firestore";
-import { UserPlus, Users, ChevronDown, Trash2, RefreshCw, Eye } from "lucide-react";
+import { getOrgUsers, UserProfile, Role, getOrganizations, Organization } from "@/lib/firestore";
+import { db } from "@/lib/firebase";
+import { doc, deleteDoc, collection, getDocs } from "firebase/firestore";
+import { UserPlus, Users, ChevronDown, Trash2, RefreshCw, Eye, Shield, AlertTriangle } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -30,6 +32,12 @@ export default function SettingsPage() {
   const [creating, setCreating] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
+  // SuperAdmin: impersonate any org+role
+  const [allOrgs, setAllOrgs] = useState<Organization[]>([]);
+  const [impersonateOrgId, setImpersonateOrgId] = useState("");
+  const [impersonateRole, setImpersonateRole] = useState<Role>("Editor");
+  const [deletingOrg, setDeletingOrg] = useState(false);
+
   const isAdmin = realRole === "SuperAdmin" || realRole === "Admin";
 
   const fetchMembers = useCallback(async () => {
@@ -52,6 +60,29 @@ export default function SettingsPage() {
 
   useEffect(() => { fetchMembers(); }, [fetchMembers]);
 
+  // Load all orgs for SuperAdmin impersonation
+  useEffect(() => {
+    if (realRole === "SuperAdmin") {
+      getOrganizations().then(orgs => {
+        setAllOrgs(orgs);
+        if (orgs.length > 0) setImpersonateOrgId(orgs[0].id);
+      }).catch(() => {});
+    }
+  }, [realRole]);
+
+  const handleImpersonateOrgRole = () => {
+    const org = allOrgs.find(o => o.id === impersonateOrgId);
+    if (!org) return;
+    startImpersonation({
+      uid: user!.uid, // keep real uid
+      email: user!.email!,
+      displayName: `${user!.displayName ?? user!.email} (SuperAdmin)`,
+      role: impersonateRole,
+      organizationId: impersonateOrgId,
+    });
+    router.push("/dashboard");
+  };
+
   const handleImpersonate = (member: UserProfile) => {
     startImpersonation({
       uid: member.uid,
@@ -61,6 +92,33 @@ export default function SettingsPage() {
       organizationId: member.organizationId ?? null,
     });
     router.push("/dashboard");
+  };
+
+  const handleDeleteOrg = async () => {
+    const org = allOrgs.find(o => o.id === impersonateOrgId);
+    if (!org) return;
+    const confirmed = confirm(
+      `⚠️ ATENCIÓN: ¿Eliminar la organización "${org.name}" permanentemente?\n\n` +
+      `Se eliminarán todos sus libros, reglas editoriales, miembros y datos.\n` +
+      `Esta acción NO se puede deshacer.\n\nEscribe el nombre para confirmar: ${org.name}`
+    );
+    if (!confirmed) return;
+    setDeletingOrg(true);
+    try {
+      // Delete subcollections: books, rules, pendingRules
+      for (const sub of ["books", "rules", "pendingRules"]) {
+        const snap = await getDocs(collection(db, "organizations", org.id, sub));
+        await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+      }
+      await deleteDoc(doc(db, "organizations", org.id));
+      setAllOrgs(prev => prev.filter(o => o.id !== org.id));
+      setImpersonateOrgId(allOrgs.find(o => o.id !== org.id)?.id ?? "");
+      setMessage({ type: "success", text: `Organización "${org.name}" eliminada.` });
+    } catch (err) {
+      setMessage({ type: "error", text: "Error eliminando organización: " + (err instanceof Error ? err.message : String(err)) });
+    } finally {
+      setDeletingOrg(false);
+    }
   };
 
   if (!isAdmin) {
@@ -384,6 +442,77 @@ export default function SettingsPage() {
           </table>
         )}
       </div>
+
+
+      {/* ── SUPERADMIN: Impersonate Org+Role ── */}
+      {realRole === "SuperAdmin" && (
+        <div style={{ marginTop: "2rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem" }}>
+            <Shield size={16} style={{ color: "#a855f7" }} />
+            <h2 style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text-main)" }}>Impersonar sesión</h2>
+            <span style={{ fontSize: "0.7rem", fontWeight: 700, padding: "0.15rem 0.5rem", borderRadius: "99px", backgroundColor: "rgba(168,85,247,0.12)", color: "#a855f7" }}>SUPERADMIN</span>
+          </div>
+          <div className="card-static" style={{ padding: "1.5rem", display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "1rem", alignItems: "flex-end" }}>
+            <div>
+              <label style={{ display: "block", marginBottom: "0.375rem", fontWeight: 600, fontSize: "0.8125rem", color: "var(--text-muted)" }}>Organización</label>
+              <select
+                className="input"
+                value={impersonateOrgId}
+                onChange={e => setImpersonateOrgId(e.target.value)}
+              >
+                {allOrgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: "block", marginBottom: "0.375rem", fontWeight: 600, fontSize: "0.8125rem", color: "var(--text-muted)" }}>Rol a simular</label>
+              <select
+                className="input"
+                value={impersonateRole}
+                onChange={e => setImpersonateRole(e.target.value as Role)}
+                style={{ backgroundColor: "var(--card-bg)" }}
+              >
+                {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
+            </div>
+            <button
+              className="btn"
+              style={{ backgroundColor: "#a855f7", borderColor: "#a855f7", display: "flex", alignItems: "center", gap: "0.375rem", whiteSpace: "nowrap" }}
+              onClick={handleImpersonateOrgRole}
+              disabled={!impersonateOrgId}
+            >
+              <Eye size={14} /> Entrar como
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── SUPERADMIN: Danger Zone — Delete Org ── */}
+      {realRole === "SuperAdmin" && (
+        <div style={{ marginTop: "2rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem" }}>
+            <AlertTriangle size={16} style={{ color: "#ef4444" }} />
+            <h2 style={{ fontSize: "1rem", fontWeight: 700, color: "#ef4444" }}>Zona de peligro</h2>
+          </div>
+          <div className="card-static" style={{ padding: "1.5rem", borderColor: "rgba(239,68,68,0.3)", display: "flex", alignItems: "center", gap: "1.5rem", flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: "200px" }}>
+              <p style={{ fontWeight: 600, color: "var(--text-main)", marginBottom: "0.25rem" }}>Eliminar organización</p>
+              <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
+                Elimina permanentemente la organización seleccionada arriba y todos sus datos (libros, normas, miembros).
+              </p>
+            </div>
+            <button
+              className="btn"
+              style={{ backgroundColor: "#ef4444", borderColor: "#ef4444", display: "flex", alignItems: "center", gap: "0.375rem", whiteSpace: "nowrap" }}
+              onClick={handleDeleteOrg}
+              disabled={deletingOrg || !impersonateOrgId}
+            >
+              {deletingOrg
+                ? <><RefreshCw size={14} style={{ animation: "spin 1s linear infinite" }} />Eliminando...</>
+                : <><Trash2 size={14} />Eliminar organización</>}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Info block */}
       <div style={{ marginTop: "1.5rem", padding: "1rem 1.25rem", backgroundColor: "rgba(99,102,241,0.06)", borderRadius: "var(--radius-md)", borderLeft: "3px solid var(--primary)", fontSize: "0.8125rem", color: "var(--text-muted)", lineHeight: 1.6 }}>

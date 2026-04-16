@@ -444,17 +444,6 @@ export default function CriteriaPage() {
         </div>
         {canManage && (
           <div style={{ display: "flex", gap: "0.625rem", flexWrap: "wrap", alignItems: "center" }}>
-            {role === "SuperAdmin" && (
-              <button
-                className="btn btn-secondary"
-                style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.875rem" }}
-                onClick={handleSeedRAE}
-                disabled={isSeeding || !orgId}
-                title="Cargar las 30+ reglas canónicas RAE/Fundéu en el manual de estilo"
-              >
-                {isSeeding ? "Cargando..." : "📚 Reglas RAE"}
-              </button>
-            )}
             <button
               className="btn btn-secondary"
               style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.875rem" }}
@@ -462,13 +451,6 @@ export default function CriteriaPage() {
               disabled={isExporting || activeRules.length === 0}
             >
               <Download size={15} /> {isExporting ? "Exportando..." : "Exportar Manual"}
-            </button>
-            <button
-              className="btn btn-secondary"
-              style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.875rem" }}
-              onClick={() => setIsExtractModalOpen(true)}
-            >
-              <FilePlus2 size={15} /> Deducir con IA
             </button>
             <button
               className="btn"

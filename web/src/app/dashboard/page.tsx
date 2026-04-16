@@ -3,9 +3,8 @@
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import {
-  FileText, Clock, Target, PenLine, FolderOpen, Palette,
-  Loader2, TrendingUp, BookOpen, ChevronRight, CheckCircle2, Sparkles,
+import { FileText, Clock, Target, PenLine, FolderOpen, Palette,
+  Loader2, TrendingUp, BookOpen, ChevronRight, CheckCircle2, Sparkles, Download,
 } from "lucide-react";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -15,7 +14,17 @@ type BookSummary = {
   id: string;
   title: string;
   status: string;
+  authorName: string;
+  fileUrl: string;
   createdAt: { toDate: () => Date } | null;
+};
+
+// Editorial correction states (visible in dashboard)
+const EDITORIAL_STATE = (status: string): { label: string; color: string } => {
+  if (status === "approved") return { label: "Editado",    color: "var(--success)" };
+  if (["review_editor", "ready", "review_author", "review_responsable"].includes(status))
+    return { label: "Editando",  color: "#6366f1" };
+  return { label: "Sin editar", color: "var(--text-muted)" };
 };
 
 const STATUS_LABEL: Record<string, { label: string; color: string }> = {
@@ -56,6 +65,8 @@ export default function DashboardPage() {
           id: bookDoc.id,
           title: data.title ?? "Sin título",
           status: data.status ?? "draft",
+          authorName: data.authorName ?? data.uploadedByName ?? "Autor desconocido",
+          fileUrl: data.fileUrl ?? "",
           createdAt: data.createdAt ?? null,
         });
 
@@ -237,26 +248,57 @@ export default function DashboardPage() {
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
             {recentBooks.map((book) => {
-              const sc = STATUS_LABEL[book.status] ?? STATUS_LABEL.draft;
+              const es = EDITORIAL_STATE(book.status);
               const dateStr = book.createdAt?.toDate
                 ? book.createdAt.toDate().toLocaleDateString("es-ES", { day: "numeric", month: "short" })
                 : "—";
+              const isApproved = book.status === "approved";
               return (
-                <Link
+                <div
                   key={book.id}
-                  href={`/dashboard/editor?bookId=${book.id}`}
                   className="card"
-                  style={{ padding: "1rem 1.25rem", display: "flex", alignItems: "center", gap: "1rem", textDecoration: "none", cursor: "pointer" }}
+                  style={{ padding: "1rem 1.25rem", display: "flex", alignItems: "center", gap: "1rem" }}
                 >
-                  <div style={{ flex: 1 }}>
-                    <span style={{ fontWeight: 600, color: "var(--text-main)", fontSize: "0.9375rem" }}>{book.title}</span>
-                    <div style={{ display: "flex", gap: "0.75rem", marginTop: "0.25rem", alignItems: "center" }}>
-                      <span style={{ fontSize: "0.75rem", fontWeight: 600, color: sc.color }}>{sc.label}</span>
+                  <Link
+                    href={`/dashboard/editor?bookId=${book.id}`}
+                    style={{ flex: 1, textDecoration: "none", minWidth: 0 }}
+                  >
+                    <span style={{ fontWeight: 600, color: "var(--text-main)", fontSize: "0.9375rem", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {book.title}
+                    </span>
+                    <div style={{ display: "flex", gap: "0.75rem", marginTop: "0.25rem", alignItems: "center", flexWrap: "wrap" }}>
+                      <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                        {book.authorName}
+                      </span>
+                      <span style={{ fontSize: "0.75rem", fontWeight: 600, color: es.color }}>
+                        ● {es.label}
+                      </span>
                       <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>{dateStr}</span>
                     </div>
-                  </div>
-                  <ChevronRight size={16} style={{ color: "var(--text-muted)" }} />
-                </Link>
+                  </Link>
+                  {/* Download button — only active when Editado */}
+                  <a
+                    href={isApproved && book.fileUrl ? book.fileUrl : undefined}
+                    download
+                    onClick={e => { if (!isApproved || !book.fileUrl) e.preventDefault(); }}
+                    title={isApproved ? "Descargar manuscrito" : "Disponible cuando el estado cambie a Editado"}
+                    style={{
+                      display: "flex", alignItems: "center", gap: "0.375rem",
+                      padding: "0.35rem 0.75rem", borderRadius: "var(--radius-md)",
+                      border: "1px solid var(--border-color)",
+                      fontSize: "0.75rem", fontWeight: 600, textDecoration: "none",
+                      color: isApproved ? "var(--primary)" : "var(--text-muted)",
+                      backgroundColor: isApproved ? "var(--primary-light)" : "transparent",
+                      cursor: isApproved ? "pointer" : "not-allowed",
+                      opacity: isApproved ? 1 : 0.45,
+                      flexShrink: 0,
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    <Download size={13} />
+                    Bajar
+                  </a>
+                </div>
               );
             })}
           </div>

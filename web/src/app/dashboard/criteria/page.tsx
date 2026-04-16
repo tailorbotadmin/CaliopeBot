@@ -481,13 +481,6 @@ export default function CriteriaPage() {
             >
               <Download size={15} /> {isExporting ? "Exportando..." : "Exportar Manual"}
             </button>
-            <button
-              className="btn"
-              style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
-              onClick={openCreateModal}
-            >
-              <Plus size={16} /> Nueva Regla Manual
-            </button>
           </div>
         )}
       </div>
@@ -613,8 +606,21 @@ export default function CriteriaPage() {
           </h2>
         </div>
 
-        {activeRules.length > 0 && categoryTabs(activeFilter, setActiveFilter, activeRules)}
-
+        {/* Filter tabs row — with Nueva Regla at the far right */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap", marginBottom: activeRules.length > 0 ? "0" : undefined }}>
+          <div style={{ flex: 1 }}>
+            {activeRules.length > 0 && categoryTabs(activeFilter, setActiveFilter, activeRules)}
+          </div>
+          {canManage && (
+            <button
+              className="btn"
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.875rem", whiteSpace: "nowrap", flexShrink: 0 }}
+              onClick={openCreateModal}
+            >
+              <Plus size={15} /> Nueva Regla Manual
+            </button>
+          )}
+        </div>
         {filteredActive.length === 0 ? (
           <div className="card-static" style={{ padding: "3rem", textAlign: "center" }}>
             <Scale size={36} style={{ color: "var(--text-muted)", opacity: 0.4, marginBottom: "1rem" }} />

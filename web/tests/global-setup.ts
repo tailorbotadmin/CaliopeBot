@@ -25,18 +25,37 @@ async function globalSetup(_config: FullConfig) {
   const page = await browser.newPage();
 
   try {
-    await page.goto(BASE_URL, { timeout: 30000 });
-    await page.waitForSelector('input[type="email"]', { timeout: 20000 });
+    // Retry loop: CI runners can be slow to boot Next.js + Firebase
+    let loggedIn = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        console.log(`\n🔐 Login attempt ${attempt}/3...`);
+        await page.goto(BASE_URL, { timeout: 60000 });
+        await page.waitForSelector('input[type="email"]', { timeout: 30000 });
 
-    await page.fill('input[type="email"]', E2E_EMAIL);
-    await page.fill('input[type="password"]', E2E_PASSWORD);
-    await page.click('button[type="submit"]');
+        await page.fill('input[type="email"]', E2E_EMAIL);
+        await page.fill('input[type="password"]', E2E_PASSWORD);
+        await page.click('button[type="submit"]');
 
-    // Wait for dashboard — confirms login succeeded
-    await page.waitForURL(/\/dashboard/, { timeout: 25000 });
+        // Wait for dashboard redirect — confirms login succeeded
+        await page.waitForURL(/\/dashboard/, { timeout: 60000 });
+        loggedIn = true;
+        break;
+      } catch (err) {
+        console.log(`  Attempt ${attempt} failed: ${err instanceof Error ? err.message : err}`);
+        if (attempt < 3) {
+          await page.waitForTimeout(3000);
+          await page.reload();
+        }
+      }
+    }
 
-    // Give Firebase JS SDK time to write auth to localStorage
-    await page.waitForTimeout(2000);
+    if (!loggedIn) {
+      throw new Error("E2E login failed after 3 attempts — check E2E_EMAIL/E2E_PASSWORD secrets");
+    }
+
+    // Give Firebase JS SDK time to write auth to localStorage / IndexedDB
+    await page.waitForTimeout(3000);
 
     // Save auth state (cookies + localStorage)
     await page.context().storageState({ path: STORAGE_STATE });

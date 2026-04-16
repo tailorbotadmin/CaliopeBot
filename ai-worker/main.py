@@ -5,6 +5,7 @@ Multi-agent editorial correction system with RAG, observability, and vector stor
 
 import io
 import os
+import re
 import json
 import uuid
 import logging

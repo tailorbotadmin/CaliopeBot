@@ -20,7 +20,7 @@ const ROLES: { value: Role; label: string; description: string }[] = [
 ];
 
 export default function SettingsPage() {
-  const { user, role, organizationId, realRole, startImpersonation } = useAuth();
+  const { user, role, organizationId, realRole, startImpersonation, impersonated } = useAuth();
   const router = useRouter();
 
   const [members, setMembers] = useState<UserProfile[]>([]);
@@ -39,6 +39,8 @@ export default function SettingsPage() {
   const [deletingOrg, setDeletingOrg] = useState(false);
 
   const isAdmin = realRole === "SuperAdmin" || realRole === "Admin";
+  // SuperAdmin sections are only visible when NOT impersonating
+  const isSuperAdmin = realRole === "SuperAdmin" && !impersonated;
 
   const fetchMembers = useCallback(async () => {
     if (!organizationId) return;
@@ -62,7 +64,7 @@ export default function SettingsPage() {
 
   // Load all orgs for SuperAdmin impersonation
   useEffect(() => {
-    if (realRole === "SuperAdmin") {
+    if (realRole === "SuperAdmin" && !impersonated) {
       getOrganizations().then(orgs => {
         setAllOrgs(orgs);
         if (orgs.length > 0) setImpersonateOrgId(orgs[0].id);
@@ -382,7 +384,7 @@ export default function SettingsPage() {
                     <td style={{ padding: "1rem 1.75rem", textAlign: "right" }}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem" }}>
                         {/* Impersonate — SuperAdmin only, not on own row */}
-                        {realRole === "SuperAdmin" && !isMe && (
+                        {realRole === "SuperAdmin" && !impersonated && !isMe && (
                           <button
                             title={`Ver dashboard como ${member.displayName ?? member.email}`}
                             onClick={() => handleImpersonate(member)}
@@ -445,7 +447,7 @@ export default function SettingsPage() {
 
 
       {/* ── SUPERADMIN: Impersonate Org+Role ── */}
-      {realRole === "SuperAdmin" && (
+      {isSuperAdmin && (
         <div style={{ marginTop: "2rem" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem" }}>
             <Shield size={16} style={{ color: "#a855f7" }} />
@@ -487,7 +489,7 @@ export default function SettingsPage() {
       )}
 
       {/* ── SUPERADMIN: Danger Zone — Delete Org ── */}
-      {realRole === "SuperAdmin" && (
+      {isSuperAdmin && (
         <div style={{ marginTop: "2rem" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem" }}>
             <AlertTriangle size={16} style={{ color: "#ef4444" }} />

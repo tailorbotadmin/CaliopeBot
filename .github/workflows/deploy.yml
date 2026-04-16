@@ -55,6 +55,13 @@ jobs:
             --set-env-vars "ENVIRONMENT=production,GCP_PROJECT_ID=${{ env.PROJECT_ID }},GCP_LOCATION=${{ env.REGION }}" \
             --allow-unauthenticated
 
+      - name: Make ai-worker publicly accessible (IAM)
+        run: |
+          gcloud run services add-iam-policy-binding ${{ env.AI_WORKER_SERVICE }} \
+            --region ${{ env.REGION }} \
+            --member="allUsers" \
+            --role="roles/run.invoker"
+
       - name: Get AI worker service URL
         id: get_url
         run: |

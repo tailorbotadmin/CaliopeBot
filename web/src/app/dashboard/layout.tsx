@@ -58,13 +58,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { href: "/dashboard/corrections", label: "Mis Correcciones", icon: FileCheck, roles: null },
     { href: "/dashboard/books", label: "Mis Manuscritos", icon: BookOpen, roles: null },
     { href: "/dashboard/training", label: "Entrenamiento", icon: GraduationCap, roles: ["SuperAdmin"] },
-    { href: "/dashboard/reports", label: "Reportes", icon: BarChart3, roles: ["SuperAdmin", "Admin", "Responsable_Editorial", "Responsable Editorial"] },
+    { href: "/dashboard/reports", label: "Reportes", icon: BarChart3, roles: ["SuperAdmin", "Admin", "Responsable_Editorial"] },
   ];
 
   const adminNav = [
-    { href: "/dashboard/organizations", label: "Organizaciones", icon: Building2, roles: ["SuperAdmin", "Admin"] },
-    { href: "/dashboard/criteria", label: "Criterios Editoriales", icon: BookOpen, roles: ["SuperAdmin", "Admin", "Responsable_Editorial", "Responsable Editorial"] },
-    { href: "/dashboard/settings", label: "Configuración", icon: Settings, roles: ["SuperAdmin", "Admin"] },
+    { href: "/dashboard/organizations", label: "Organizaciones", icon: Building2, roles: ["SuperAdmin", "Admin", "Responsable_Editorial"] },
+    { href: "/dashboard/criteria", label: "Criterios Editoriales", icon: BookOpen, roles: ["SuperAdmin", "Admin", "Responsable_Editorial"] },
+    { href: "/dashboard/settings", label: "Configuración", icon: Settings, roles: ["SuperAdmin", "Admin", "Responsable_Editorial"] },
   ];
 
   const isActive = (href: string) => {
@@ -88,7 +88,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     );
   };
 
-  const showAdminNav = effectiveRole === "SuperAdmin" || effectiveRole === "Admin";
+  const showAdminNav = effectiveRole === "SuperAdmin" || effectiveRole === "Admin" || effectiveRole === "Responsable_Editorial";
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", flexDirection: "column" }}>

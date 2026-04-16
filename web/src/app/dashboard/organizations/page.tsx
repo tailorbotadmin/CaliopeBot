@@ -6,12 +6,12 @@ import { Building2, Users, UserPlus, ChevronDown, ChevronUp, Loader2, X, Shield,
 import { getOrganizations, createOrganization, getOrgUsers, Organization, UserProfile, Role } from "@/lib/firestore";
 import { useRouter } from "next/navigation";
 
-const ROLES: Role[] = ["Admin", "Responsable_Editorial", "Editor", "Autor", "Traductor"];
+const ROLES: Role[] = ["Responsable_Editorial", "Editor", "Autor", "Traductor"];
 
 const ROLE_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  SuperAdmin:           { label: "Super Admin",        color: "#e11d48", bg: "rgba(225,29,72,0.1)" },
-  Admin:                { label: "Admin",               color: "var(--primary)", bg: "var(--primary-light)" },
-  Responsable_Editorial:{ label: "Resp. Editorial",    color: "#a855f7", bg: "rgba(168,85,247,0.1)" },
+  SuperAdmin:            { label: "SuperAdmin",          color: "#a855f7", bg: "rgba(168,85,247,0.1)" },
+  Admin:                 { label: "Admin (legacy)",       color: "var(--primary)", bg: "var(--primary-light)" },
+  Responsable_Editorial: { label: "Resp. Editorial",      color: "var(--primary)", bg: "var(--primary-light)" },
   Editor:               { label: "Editor",             color: "#6366f1", bg: "rgba(99,102,241,0.1)" },
   Autor:                { label: "Autor",              color: "#06b6d4", bg: "rgba(6,182,212,0.1)" },
   Traductor:            { label: "Traductor",          color: "#f59e0b", bg: "rgba(245,158,11,0.12)" },
@@ -46,7 +46,7 @@ export default function OrganizationsPage() {
 
   useEffect(() => {
     if (!loading) {
-      if (role !== "SuperAdmin" && role !== "Admin") {
+      if (role !== "SuperAdmin" && role !== "Admin" && role !== "Responsable_Editorial") {
         router.push("/dashboard");
         return;
       }

@@ -30,6 +30,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }
   error:               { label: "Error",               color: "#ef4444",            bg: "rgba(239,68,68,0.12)" },
 };
 
+// Admin kept for backward-compat with existing tokens; Responsable_Editorial is the canonical admin role
 const ADMIN_ROLES = ["SuperAdmin", "Admin", "Responsable_Editorial"];
 
 export default function BooksPage() {

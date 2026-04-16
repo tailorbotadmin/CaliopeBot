@@ -11,12 +11,11 @@ import { UserPlus, Users, ChevronDown, Trash2, RefreshCw, Eye, Shield, AlertTria
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-const ROLES: { value: Role; label: string; description: string }[] = [
-  { value: "Autor",                label: "Autor",                description: "Solo revisa sus manuscritos aprobados" },
-  { value: "Traductor",            label: "Traductor",            description: "Flujo similar al Autor" },
-  { value: "Editor",               label: "Editor",               description: "Corrige y revisa todos los documentos" },
-  { value: "Responsable_Editorial",label: "Responsable Editorial",description: "Aprobación final de correcciones" },
-  { value: "Admin",                label: "Administrador",        description: "Gestión total de la organización" },
+const ROLES: { value: Role; label: string }[] = [
+  { value: "Responsable_Editorial", label: "Responsable Editorial" },
+  { value: "Editor",                label: "Editor" },
+  { value: "Traductor",             label: "Traductor" },
+  { value: "Autor",                 label: "Autor" },
 ];
 
 export default function SettingsPage() {
@@ -38,7 +37,8 @@ export default function SettingsPage() {
   const [impersonateRole, setImpersonateRole] = useState<Role>("Editor");
   const [deletingOrg, setDeletingOrg] = useState(false);
 
-  const isAdmin = realRole === "SuperAdmin" || realRole === "Admin";
+  // Responsable_Editorial is now the admin-level role ('Admin' kept for backward-compat)
+  const isAdmin = realRole === "SuperAdmin" || realRole === "Admin" || realRole === "Responsable_Editorial";
   // SuperAdmin sections are only visible when NOT impersonating
   const isSuperAdmin = realRole === "SuperAdmin" && !impersonated;
 
@@ -49,7 +49,7 @@ export default function SettingsPage() {
       const users = await getOrgUsers(organizationId);
       // Put current user first, then sort by role weight
       const roleWeight: Record<string, number> = {
-        SuperAdmin: 0, Admin: 1, Responsable_Editorial: 2, Editor: 3, Traductor: 4, Autor: 5,
+        SuperAdmin: 0, Admin: 1, Responsable_Editorial: 1, Editor: 2, Traductor: 3, Autor: 4,
       };
       users.sort((a, b) => (roleWeight[a.role] ?? 9) - (roleWeight[b.role] ?? 9));
       setMembers(users);
@@ -210,7 +210,7 @@ export default function SettingsPage() {
   const roleColors: Record<string, string> = {
     SuperAdmin: "#a855f7",
     Admin: "var(--primary)",
-    Responsable_Editorial: "#f59e0b",
+    Responsable_Editorial: "var(--primary)",
     Editor: "#10b981",
     Traductor: "#06b6d4",
     Autor: "var(--text-muted)",
@@ -277,8 +277,8 @@ export default function SettingsPage() {
                 <select className="input" value={formData.role}
                   onChange={e => setFormData(p => ({ ...p, role: e.target.value as Role }))}
                   style={{ backgroundColor: "var(--card-bg)" }}>
-                  {ROLES.filter(r => r.value !== "Admin" || role === "SuperAdmin").map(r => (
-                    <option key={r.value} value={r.value}>{r.label} — {r.description}</option>
+                  {ROLES.map(r => (
+                    <option key={r.value} value={r.value}>{r.label}</option>
                   ))}
                 </select>
               </div>
@@ -323,7 +323,9 @@ export default function SettingsPage() {
             <tbody>
               {members.map((member, i) => {
                 const isMe = member.uid === user?.uid;
-                const canEdit = (role === "SuperAdmin") || (role === "Admin" && member.role !== "SuperAdmin" && member.role !== "Admin");
+                const canEdit = (role === "SuperAdmin")
+                  || ((role === "Admin" || role === "Responsable_Editorial")
+                    && member.role !== "SuperAdmin" && member.role !== "Admin" && member.role !== "Responsable_Editorial");
                 return (
                   <tr key={member.uid} style={{ borderBottom: i < members.length - 1 ? "1px solid var(--border-color)" : "none", backgroundColor: isMe ? "rgba(99,102,241,0.03)" : "transparent" }}>
                     {/* Name */}
@@ -367,7 +369,7 @@ export default function SettingsPage() {
                               opacity: updatingUid === member.uid ? 0.5 : 1,
                             }}
                           >
-                            {ROLES.filter(r => r.value !== "Admin" || role === "SuperAdmin").map(r => (
+                            {ROLES.map(r => (
                               <option key={r.value} value={r.value}>{r.label}</option>
                             ))}
                           </select>

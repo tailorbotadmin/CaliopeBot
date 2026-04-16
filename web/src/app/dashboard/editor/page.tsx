@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { collection, query, orderBy, getDocs, doc, setDoc, getDoc, addDoc, serverTimestamp } from "firebase/firestore";
+import { collection, query, orderBy, onSnapshot, doc, setDoc, getDoc, addDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { updateBookStatus, notifyResponsables } from "@/lib/firestore";
 import { Document, Packer, Paragraph, TextRun } from "docx";
@@ -39,14 +39,13 @@ export default function EditorPage() {
   const [currentChunkIndex, setCurrentChunkIndex] = useState(0);
   const [bookStatus, setBookStatus] = useState<string>("processing");
   const [bookTitle, setBookTitle] = useState<string>("");
+  const [processedCount, setProcessedCount] = useState(0);
+  const [totalChunks, setTotalChunks] = useState(0);
 
   const [selectedSuggestion, setSelectedSuggestion] = useState<string | null>(null);
   const [editingSuggestion, setEditingSuggestion] = useState<string | null>(null);
   const [customEdit, setCustomEdit] = useState("");
   const [jumpInput, setJumpInput] = useState("");
-
-  // Auto-refresh when processing
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const suggestions: Suggestion[] = useMemo(() => {
     if (chunks.length === 0) return [];
@@ -73,43 +72,39 @@ export default function EditorPage() {
     return { total, resolved, pct: total > 0 ? Math.round((resolved / total) * 100) : 0 };
   }, [chunks]);
 
-  const fetchData = useCallback(async () => {
+  // ── Real-time book listener ───────────────────────────────────────
+  useEffect(() => {
     if (!organizationId || !bookId) return;
-    try {
-      const bookSnap = await getDoc(doc(db, "organizations", organizationId, "books", bookId));
-      if (bookSnap.exists()) {
-        const data = bookSnap.data();
-        setBookStatus(data.status);
+    const bookRef = doc(db, "organizations", organizationId, "books", bookId);
+    const unsub = onSnapshot(bookRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setBookStatus(data.status ?? "processing");
         setBookTitle(data.title ?? "");
+        setTotalChunks(data.totalChunks ?? 0);
+        setProcessedCount(data.processedChunks ?? 0);
       }
-
-      const q = query(
-        collection(db, "organizations", organizationId, "books", bookId, "chunks"),
-        orderBy("order", "asc")
-      );
-      const snap = await getDocs(q);
-      const fetched = snap.docs.map(d => ({ id: d.id, ...d.data() } as Chunk));
-      setChunks(fetched);
-    } catch (err) {
-      console.error("Error fetching chunks:", err);
-    }
+    });
+    return unsub;
   }, [organizationId, bookId]);
 
+  // ── Real-time chunks listener ─────────────────────────────────────
+  // Updates chunk list live as the worker commits each batch.
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    if (!organizationId || !bookId) return;
+    const q = query(
+      collection(db, "organizations", organizationId, "books", bookId, "chunks"),
+      orderBy("order", "asc")
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const fetched = snap.docs.map(d => ({ id: d.id, ...d.data() } as Chunk));
+      setChunks(fetched);
+    }, (err) => {
+      console.error("Error listening to chunks:", err);
+    });
+    return unsub;
+  }, [organizationId, bookId]);
 
-  // Auto-poll when processing
-  useEffect(() => {
-    if (bookStatus === "processing") {
-      pollRef.current = setInterval(() => {
-        fetchData();
-      }, 5000);
-    } else {
-      if (pollRef.current) clearInterval(pollRef.current);
-    }
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [bookStatus, fetchData]);
 
   const handleNextPhase = async () => {
     if (!bookId || !organizationId) return;
@@ -250,8 +245,14 @@ export default function EditorPage() {
 
   if (!bookId) return <div style={{ padding: "2rem" }}>No se ha seleccionado ningún libro.</div>;
 
-  // Processing state — auto-refresh spinner
-  if (bookStatus === "processing" && chunks.every(c => c.status === "pending" || c.suggestions === undefined)) {
+  // Count processed chunks
+  const processedChunks = chunks.filter(c => c.status === "processed").length;
+  const isStillProcessing = bookStatus === "processing";
+  const hasReadyChunks = processedChunks > 0;
+
+  // Only block with the full spinner if no chunks are ready yet
+  if (isStillProcessing && !hasReadyChunks) {
+    const pct = totalChunks > 0 ? Math.round((processedCount / totalChunks) * 100) : 0;
     return (
       <div className="editor-container fade-in" style={{ alignItems: "center", justifyContent: "center" }}>
         <div style={{ textAlign: "center", padding: "4rem 2rem", maxWidth: "480px" }}>
@@ -262,11 +263,22 @@ export default function EditorPage() {
             Los agentes están analizando el manuscrito
           </h2>
           <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", lineHeight: 1.6, marginBottom: "1.5rem" }}>
-            <strong style={{ color: "var(--primary)" }}>{bookTitle || "El manuscrito"}</strong> está siendo procesado por el pipeline multi-agente. 
-            Esta pantalla se actualizará automáticamente cada 5 segundos.
+            <strong style={{ color: "var(--primary)" }}>{bookTitle || "El manuscrito"}</strong> está siendo procesado.
+            La edición se desbloqueará en cuanto el primer segmento esté listo.
           </p>
+          {totalChunks > 0 && (
+            <div style={{ marginBottom: "1rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.375rem" }}>
+                <span>Segmentos analizados</span>
+                <span>{processedCount} / {totalChunks}</span>
+              </div>
+              <div style={{ height: "6px", borderRadius: "99px", backgroundColor: "var(--border-color)", overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${pct}%`, backgroundColor: "var(--primary)", borderRadius: "99px", transition: "width 0.5s ease" }} />
+              </div>
+            </div>
+          )}
           <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.375rem" }}>
-            <div className="pulse-dot" /> Comprobando estado...
+            <div className="pulse-dot" /> El análisis se actualiza en tiempo real...
           </div>
           <button
             className="btn btn-secondary"
@@ -308,6 +320,32 @@ export default function EditorPage() {
 
   return (
     <div className="editor-container fade-in">
+      {/* ── Non-blocking analysis progress banner ───────────────────── */}
+      {isStillProcessing && hasReadyChunks && (
+        <div style={{
+          backgroundColor: "rgba(99,102,241,0.08)",
+          borderBottom: "1px solid rgba(99,102,241,0.2)",
+          padding: "0.5rem 1.5rem",
+          display: "flex",
+          alignItems: "center",
+          gap: "0.75rem",
+          fontSize: "0.8125rem",
+          color: "var(--text-muted)",
+        }}>
+          <div className="pulse-dot" style={{ flexShrink: 0 }} />
+          <span>
+            Analizando{totalChunks > 0 ? `: ${processedChunks} / ${totalChunks} segmentos listos` : "…"}
+          </span>
+          {totalChunks > 0 && (
+            <div style={{ flex: 1, maxWidth: "200px", height: "4px", backgroundColor: "var(--border-color)", borderRadius: "2px", overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${Math.round((processedChunks / totalChunks) * 100)}%`, backgroundColor: "var(--primary)", borderRadius: "2px", transition: "width 0.5s ease" }} />
+            </div>
+          )}
+          <span style={{ marginLeft: "auto", color: "#6366f1", fontWeight: 600 }}>
+            Los segmentos listos ya están disponibles para editar
+          </span>
+        </div>
+      )}
       <header className="editor-header">
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.625rem", marginBottom: "0.25rem" }}>

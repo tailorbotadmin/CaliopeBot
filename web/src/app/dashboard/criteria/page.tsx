@@ -602,44 +602,76 @@ export default function CriteriaPage() {
             </p>
           </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "1rem" }}>
-            {filteredActive.map(rule => (
-              <div key={rule.id} className="card-static" style={{ padding: "1.25rem 1.5rem", position: "relative" }}>
-                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "0.5rem", marginBottom: "0.5rem" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", flex: 1 }}>
-                    <Scale size={14} style={{ color: "var(--primary)", flexShrink: 0 }} />
-                    <h3 style={{ fontSize: "0.9375rem", fontWeight: 700, color: "var(--text-main)" }}>{getRuleName(rule)}</h3>
-                  </div>
-                  <CategoryBadge category={rule.category} />
-                </div>
-                <p style={{ color: "var(--text-muted)", fontSize: "0.8375rem", lineHeight: 1.6, marginBottom: rule.source ? "0.5rem" : "0" }}>
-                  {rule.description}
-                </p>
-                {rule.source && (
-                  <p style={{ marginTop: "0.5rem", fontSize: "0.7rem", color: "var(--text-muted)", fontStyle: "italic" }}>
-                    Fuente: {rule.source.replace(" Manuscrito.docx", "")}
-                  </p>
-                )}
-                {canManage && (
-                  <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.875rem", paddingTop: "0.75rem", borderTop: "1px solid var(--border-color)" }}>
-                    <button
-                      className="btn btn-secondary"
-                      style={{ flex: 1, padding: "0.35rem 0.5rem", fontSize: "0.75rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.3rem" }}
-                      onClick={() => openEditModal(rule)}
-                    >
-                      <PenLine size={12} /> Editar
-                    </button>
-                    <button
-                      className="btn btn-secondary"
-                      style={{ flex: 1, padding: "0.35rem 0.5rem", fontSize: "0.75rem", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.3rem", borderColor: "rgba(239,68,68,0.3)", color: "var(--danger)" }}
-                      onClick={() => handleDeleteRule(rule)}
-                    >
-                      <Trash2 size={12} /> Eliminar
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
+          <div className="card-static" style={{ padding: 0, overflow: "hidden" }}>
+            {/* Scroll container */}
+            <div style={{ maxHeight: "600px", overflowY: "auto" }}>
+              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                {filteredActive.map((rule, idx) => (
+                  <li
+                    key={rule.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: "0.875rem",
+                      padding: "0.9rem 1.25rem",
+                      borderBottom: "1px solid var(--border-color)",
+                      transition: "background 0.15s",
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background = "var(--bg-color)")}
+                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                  >
+                    {/* Index */}
+                    <span style={{
+                      minWidth: "1.75rem", textAlign: "right",
+                      fontSize: "0.75rem", color: "var(--text-muted)",
+                      paddingTop: "0.2rem", flexShrink: 0,
+                    }}>
+                      {idx + 1}.
+                    </span>
+
+                    {/* Content */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.25rem" }}>
+                        <span style={{ fontWeight: 700, fontSize: "0.9rem", color: "var(--text-main)" }}>
+                          {getRuleName(rule)}
+                        </span>
+                        <CategoryBadge category={rule.category} />
+                      </div>
+                      <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>
+                        {rule.description}
+                      </p>
+                      {rule.source && (
+                        <p style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontStyle: "italic", marginTop: "0.25rem" }}>
+                          Fuente: {rule.source.replace(" Manuscrito.docx", "")}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Actions */}
+                    {canManage && (
+                      <div style={{ display: "flex", gap: "0.375rem", flexShrink: 0, paddingTop: "0.1rem" }}>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: "0.3rem 0.625rem", fontSize: "0.75rem", display: "flex", alignItems: "center", gap: "0.25rem" }}
+                          onClick={() => openEditModal(rule)}
+                          title="Editar norma"
+                        >
+                          <PenLine size={12} /> Editar
+                        </button>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: "0.3rem 0.625rem", fontSize: "0.75rem", display: "flex", alignItems: "center", gap: "0.25rem", borderColor: "rgba(239,68,68,0.3)", color: "var(--danger)" }}
+                          onClick={() => handleDeleteRule(rule)}
+                          title="Eliminar norma"
+                        >
+                          <Trash2 size={12} /> Eliminar
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
         )}
       </div>

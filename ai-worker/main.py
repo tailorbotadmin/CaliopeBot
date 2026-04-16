@@ -797,7 +797,150 @@ async def seed_rae_rules_endpoint(request: SeedRAERulesRequest, raw_req: Request
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Language detection helpers ───────────────────────────────────────────────
+
+_SPANISH_PATTERN = re.compile(
+    r"[ñáéíóúüÁÉÍÓÚÜ]|"
+    r"\b(de|el|la|los|las|en|que|con|por|para|como|del|una|sin|este|esta|se|su|sus|al|"
+    r"pero|más|no|es|son|fue|han|hay|un|su|ya|lo|le|si|yo|mi|te|me)\b",
+    re.IGNORECASE,
+)
+_ENGLISH_PATTERN = re.compile(
+    r"\b(the|and|or|with|for|from|text|using|when|should|must|will|are|is|be|that|this|which|"
+    r"have|has|been|their|can|may|format|list|header|italic|bold|margin|spacing|font|style|"
+    r"rule|item|use|used|applied|correction|spelling|capitalization|punctuation|alignment|"
+    r"inclusion|placement|numbering|formatting|usage|dialogue|paragraph|footnote|quotation|"
+    r"consistency|choice|structure|flow|marks|page|title|chapter|content)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_english_text(text: str) -> bool:
+    if not text:
+        return False
+    return bool(_ENGLISH_PATTERN.search(text)) and not bool(_SPANISH_PATTERN.search(text))
+
+
+class TranslateRulesRequest(BaseModel):
+    organizationId: str
+
+
+@app.post("/api/v1/translate-rules")
+async def translate_rules_endpoint(request: TranslateRulesRequest, raw_req: Request):
+    """SuperAdmin endpoint: detect English rules in an org and translate them to Spanish.
+    Uses the Gemini client already configured in this worker — no extra credentials needed.
+    """
+    auth_header = raw_req.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
+
+    token = auth_header.split("Bearer ")[1]
+    try:
+        from firebase_admin import auth as firebase_auth
+
+        decoded_token = firebase_auth.verify_id_token(token)
+        if decoded_token.get("role") != "SuperAdmin":
+            raise HTTPException(status_code=403, detail="Solo SuperAdmins pueden traducir normas")
+
+        org_ref = db.collection("organizations").document(request.organizationId)
+
+        # 1. Collect English rules from both collections
+        english_rules = []
+        for col_name in ("rules", "pendingRules"):
+            snap = org_ref.collection(col_name).stream()
+            for doc_snap in snap:
+                data = doc_snap.to_dict()
+                name = data.get("name") or data.get("rule") or ""
+                desc = data.get("description") or ""
+                if _is_english_text(f"{name} {desc}"):
+                    if (data.get("source") or "").startswith("RAE"):
+                        continue  # never touch RAE rules
+                    english_rules.append({
+                        "ref": doc_snap.reference,
+                        "name": name,
+                        "description": desc,
+                    })
+
+        if not english_rules:
+            return {"status": "ok", "translated": 0, "message": "No se encontraron normas en inglés."}
+
+        logger.info(f"translate-rules: {len(english_rules)} English rules found in org={request.organizationId}")
+
+        # 2. Translate in batches of 10 using the configured Gemini client
+        BATCH_SIZE = 10
+        schema = {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "nombre": {"type": "STRING"},
+                    "descripcion": {"type": "STRING"},
+                },
+                "required": ["nombre", "descripcion"],
+            },
+        }
+
+        translated_count = 0
+        for i in range(0, len(english_rules), BATCH_SIZE):
+            batch_rules = english_rules[i:i + BATCH_SIZE]
+            list_text = "\n".join(
+                f'{j+1}. Nombre: "{r["name"]}" | Descripción: "{r["description"][:200]}"'
+                for j, r in enumerate(batch_rules)
+            )
+            prompt = (
+                "Eres un editor experto en lengua española. "
+                "Traduce al español cada una de las siguientes normas editoriales.\n"
+                "Para cada una devuelve:\n"
+                "- \"nombre\": nombre breve de la norma en español (máx. 8 palabras)\n"
+                "- \"descripcion\": explicación práctica en español (1-2 frases)\n\n"
+                "IMPORTANTE: Toda la respuesta en español. No uses inglés en ningún campo.\n\n"
+                f"{list_text}"
+            )
+
+            if client:
+                try:
+                    response = client.models.generate_content(
+                        model=settings.LLM_MODEL,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            response_schema=schema,
+                            temperature=0.2,
+                        ),
+                    )
+                    translated = json.loads(response.text)
+                except Exception as e:
+                    logger.warning(f"Gemini translation error batch {i}: {e}")
+                    translated = [{"nombre": r["name"], "descripcion": r["description"]} for r in batch_rules]
+            else:
+                translated = [{"nombre": r["name"], "descripcion": r["description"]} for r in batch_rules]
+
+            # 3. Write translated names back to Firestore
+            firestore_batch = db.batch()
+            for j, rule in enumerate(batch_rules):
+                t = translated[j] if j < len(translated) else {"nombre": rule["name"], "descripcion": rule["description"]}
+                firestore_batch.update(rule["ref"], {
+                    "name": t["nombre"],
+                    "rule": t["nombre"],
+                    "description": t["descripcion"],
+                })
+                translated_count += 1
+            firestore_batch.commit()
+
+        logger.info(f"translate-rules: translated {translated_count} rules for org={request.organizationId}")
+        return {
+            "status": "success",
+            "organizationId": request.organizationId,
+            "translated": translated_count,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error translating rules: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-

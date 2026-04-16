@@ -91,6 +91,7 @@ export default function CriteriaPage() {
 
   const [isSeeding, setIsSeeding] = useState(false);
   const [seedResult, setSeedResult] = useState<string | null>(null);
+  const [isTranslating, setIsTranslating] = useState(false);
 
   const canManage = role === "SuperAdmin" || role === "Admin" || role === "Responsable_Editorial";
 
@@ -188,6 +189,34 @@ export default function CriteriaPage() {
     if (!orgId) return;
     if (!confirm(`¿Cargar las reglas canónicas RAE (Ortografía 2010 + DPD) en el manual de estilo? Las reglas ya existentes no se duplicarán.`)) return;
     await seedRAERules(orgId);
+  };
+
+  // ---- Translate English rules to Spanish via Cloud Run worker ----
+  const handleTranslateRules = async () => {
+    if (!orgId) return;
+    if (!confirm("¿Traducir al español todas las normas en inglés de esta organización? (Las normas RAE no se tocarán)")) return;
+    setIsTranslating(true);
+    setSeedResult(null);
+    try {
+      const { auth: firebaseAuth } = await import("@/lib/firebase");
+      const token = await firebaseAuth.currentUser?.getIdToken();
+      const res = await fetch(`${API_URL}/api/v1/translate-rules`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ organizationId: orgId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail ?? "Error");
+      setSeedResult(
+        data.translated > 0
+          ? `✓ ${data.translated} normas traducidas al español.`
+          : "Sin cambios: no se encontraron normas en inglés."
+      );
+    } catch (err) {
+      setSeedResult("✕ Error: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsTranslating(false);
+    }
   };
 
   // ---- Approve pending rule ----
@@ -465,7 +494,7 @@ export default function CriteriaPage() {
 
       {/* Editorial selector for SuperAdmin */}
       {role === "SuperAdmin" && orgs.length > 0 && (
-        <div className="card-static" style={{ marginBottom: "1.5rem", padding: "1rem 1.25rem", display: "flex", alignItems: "center", gap: "1rem" }}>
+        <div className="card-static" style={{ marginBottom: "1.5rem", padding: "1rem 1.25rem", display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
           <Building2 size={16} style={{ color: "var(--primary)", flexShrink: 0 }} />
           <label style={{ fontWeight: 600, fontSize: "0.875rem", color: "var(--text-main)", whiteSpace: "nowrap" }}>Editorial:</label>
           <select
@@ -481,6 +510,18 @@ export default function CriteriaPage() {
           <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
             {activeRules.length} regla{activeRules.length !== 1 ? "s" : ""} activa{activeRules.length !== 1 ? "s" : ""}
           </span>
+          {/* Translate any English rules to Spanish */}
+          <button
+            className="btn btn-secondary"
+            style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.8125rem" }}
+            onClick={handleTranslateRules}
+            disabled={isTranslating || !orgId}
+            title="Detecta normas en inglés y las traduce al español usando el worker de IA"
+          >
+            {isTranslating
+              ? <><span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⏳</span> Traduciendo...</>
+              : "🌐 Traducir al español"}
+          </button>
         </div>
       )}
 

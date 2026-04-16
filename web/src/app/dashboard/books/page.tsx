@@ -143,11 +143,16 @@ export default function BooksPage() {
   // ---- Trigger or re-trigger AI Worker ingestion ----
   const triggerIngestion = async (bookId: string, orgId: string, fileUrl: string, authorId: string): Promise<boolean> => {
     try {
+      // 60s timeout: Cloud Run cold starts can take 15-30s
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
       const res = await fetch(`${API_URL}/api/v1/ingest-book`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bookId, organizationId: orgId, fileUrl, authorId })
+        body: JSON.stringify({ bookId, organizationId: orgId, fileUrl, authorId }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
       if (!res.ok) {
         const detail = await res.text().catch(() => res.statusText);
         throw new Error(`Worker respondió ${res.status}: ${detail}`);

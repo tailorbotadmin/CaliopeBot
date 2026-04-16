@@ -4,11 +4,11 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
 import {
   getBooksByOrganization, getOrganizations, createBook,
-  updateBookStatus, Book, Organization, getOrgUsers, UserProfile,
+  updateBookStatus, assignBookEditor, Book, Organization, getOrgUsers, UserProfile,
 } from "@/lib/firestore";
 import {
   FolderOpen, FileText, UploadCloud, CheckCircle2, Clock, Loader2,
-  Download, Unlock, AlertCircle, RefreshCw, Trash2, UserCircle2, Plus, X,
+  Download, Unlock, AlertCircle, RefreshCw, Trash2, UserCircle2, Plus, X, UserCheck,
 } from "lucide-react";
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { storage, db } from "@/lib/firebase";
@@ -39,6 +39,8 @@ export default function BooksPage() {
   const [books, setBooks] = useState<Book[]>([]);
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [orgAuthors, setOrgAuthors] = useState<UserProfile[]>([]);
+  const [orgEditors, setOrgEditors] = useState<UserProfile[]>([]); // Editors for assignment
+  const [assigningId, setAssigningId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -67,14 +69,17 @@ export default function BooksPage() {
   const isAdmin = ADMIN_ROLES.includes(role ?? "");
   const isAuthor = role === "Autor" || role === "Traductor";
 
-  // Load authors for the selected org
+  // Load authors (Autor/Traductor) for the selected org
   const loadAuthors = useCallback(async (orgId: string) => {
     if (!isAdmin) return;
     try {
       const users = await getOrgUsers(orgId);
       setOrgAuthors(users.filter(u => u.role === "Autor" || u.role === "Traductor"));
+      // Also load editors for assignment
+      setOrgEditors(users.filter(u => u.role === "Editor" || u.role === "Responsable_Editorial"));
     } catch {
       setOrgAuthors([]);
+      setOrgEditors([]);
     }
   }, [isAdmin]);
 
@@ -217,6 +222,31 @@ export default function BooksPage() {
       alert("No se pudo eliminar el manuscrito: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  // ---- Assign corrector (editor) to a book ----
+  const handleAssignEditor = async (book: Book, editorId: string) => {
+    if (!selectedOrgId) return;
+    setAssigningId(book.id);
+    try {
+      const editor = editorId ? orgEditors.find(e => e.uid === editorId) ?? null : null;
+      await assignBookEditor(
+        selectedOrgId,
+        book.id,
+        editor ? editor.uid : null,
+        editor ? (editor.displayName ?? editor.email) : null,
+      );
+      setBooks(prev => prev.map(b =>
+        b.id === book.id
+          ? { ...b, assignedEditorId: editor?.uid ?? undefined, assignedEditorName: editor ? (editor.displayName ?? editor.email) : undefined }
+          : b
+      ));
+    } catch (err) {
+      console.error("Error asignando corrector:", err);
+      alert("No se pudo asignar el corrector.");
+    } finally {
+      setAssigningId(null);
     }
   };
 
@@ -562,6 +592,34 @@ export default function BooksPage() {
                         ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
                         : <Unlock size={13} />}
                     </button>
+                  )}
+
+                  {/* Assign corrector — Responsable_Editorial / SuperAdmin only */}
+                  {isAdmin && orgEditors.length > 0 && (
+                    <div style={{ position: "relative", display: "flex", alignItems: "center", gap: "0.25rem" }}>
+                      <UserCheck size={13} style={{ color: "var(--primary)", flexShrink: 0 }} />
+                      <select
+                        value={book.assignedEditorId ?? ""}
+                        onChange={e => handleAssignEditor(book, e.target.value)}
+                        disabled={assigningId === book.id}
+                        title="Asignar corrector"
+                        style={{
+                          fontSize: "0.72rem",
+                          padding: "0.2rem 0.3rem",
+                          borderRadius: "var(--radius)",
+                          border: "1px solid var(--border-color)",
+                          backgroundColor: "var(--card-bg)",
+                          color: "var(--text-main)",
+                          cursor: "pointer",
+                          maxWidth: "110px",
+                        }}
+                      >
+                        <option value="">Sin corrector</option>
+                        {orgEditors.map(e => (
+                          <option key={e.uid} value={e.uid}>{e.displayName ?? e.email}</option>
+                        ))}
+                      </select>
+                    </div>
                   )}
 
                   {/* Delete — triggers confirmation modal */}

@@ -47,6 +47,8 @@ export interface Book {
   fileName?: string;
   errorMessage?: string;
   createdAt: FirestoreDate;
+  assignedEditorId?: string;
+  assignedEditorName?: string;
 }
 
 export async function updateBookStatus(orgId: string, bookId: string, status: string, errorMessage?: string) {
@@ -55,6 +57,16 @@ export async function updateBookStatus(orgId: string, bookId: string, status: st
   if (errorMessage !== undefined) update.errorMessage = errorMessage;
   await updateDoc(bookRef, update);
 }
+export async function assignBookEditor(
+  orgId: string,
+  bookId: string,
+  editorId: string | null,
+  editorName: string | null,
+) {
+  const bookRef = doc(db, 'organizations', orgId, 'books', bookId);
+  await updateDoc(bookRef, { assignedEditorId: editorId, assignedEditorName: editorName });
+}
+
 
 // ==========================================
 // USER PROFILES

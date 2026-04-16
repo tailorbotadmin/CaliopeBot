@@ -137,6 +137,9 @@ jobs:
             --set-env-vars "NEXT_PUBLIC_API_URL=${{ needs.deploy-ai-worker.outputs.worker_url }}" \
             --allow-unauthenticated
 
+      - name: Install firebase-tools
+        run: npm install -g firebase-tools
+
       - name: Deploy Firebase Hosting (rewrite → Cloud Run)
         run: |
           firebase deploy --only hosting \

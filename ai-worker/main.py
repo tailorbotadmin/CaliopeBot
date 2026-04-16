@@ -315,8 +315,10 @@ async def process_book_background(org_id: str, book_id: str, author_id: str):
 
         if processed_count > 0:
             batch.commit()
+        else:
+            logger.warning(f"No pending chunks found for book={book_id}. Already processed or empty.")
 
-        # Update book status
+        # Update book status — always runs even if processed_count == 0
         book_ref = (
             db.collection("organizations").document(org_id)
             .collection("books").document(book_id)
@@ -325,7 +327,19 @@ async def process_book_background(org_id: str, book_id: str, author_id: str):
         logger.info(f"Background done: book={book_id}, processed={processed_count}")
 
     except Exception as e:
-        logger.error(f"Background task error: {e}", exc_info=True)
+        logger.error(f"Background task error for book={book_id}: {e}", exc_info=True)
+        # Mark book as error so the user can see it and retry
+        try:
+            book_ref = (
+                db.collection("organizations").document(org_id)
+                .collection("books").document(book_id)
+            )
+            book_ref.update({
+                "status": "error",
+                "errorMessage": str(e)[:500],  # cap at 500 chars
+            })
+        except Exception as inner_e:
+            logger.error(f"Could not update error status for book={book_id}: {inner_e}")
     finally:
         ACTIVE_JOBS.dec()
 

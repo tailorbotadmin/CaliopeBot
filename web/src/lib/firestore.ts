@@ -41,15 +41,18 @@ export interface Book {
   title: string;
   authorId: string;
   organizationId: string;
-  status: 'draft' | 'processing' | 'review_editor' | 'review_author' | 'review_responsable' | 'approved';
+  status: 'draft' | 'processing' | 'review_editor' | 'review_author' | 'review_responsable' | 'approved' | 'error';
   fileUrl?: string;
   fileName?: string;
+  errorMessage?: string;
   createdAt: FirestoreDate;
 }
 
-export async function updateBookStatus(orgId: string, bookId: string, status: string) {
+export async function updateBookStatus(orgId: string, bookId: string, status: string, errorMessage?: string) {
   const bookRef = doc(db, 'organizations', orgId, 'books', bookId);
-  await updateDoc(bookRef, { status });
+  const update: Record<string, unknown> = { status };
+  if (errorMessage !== undefined) update.errorMessage = errorMessage;
+  await updateDoc(bookRef, update);
 }
 
 // ==========================================
@@ -121,7 +124,9 @@ export async function createBook(orgId: string, authorId: string, title: string,
     title,
     authorId,
     organizationId: orgId,
-    status: fileUrl ? 'processing' : 'draft',
+    // Always start as 'draft'. The AI worker sets 'processing' once it
+    // confirms it received the ingestion request successfully.
+    status: 'draft',
     fileUrl: fileUrl || null,
     fileName: fileName || null,
     createdAt: serverTimestamp()

@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { getBooksByOrganization, getOrganizations, createBook, updateBookStatus, Book, Organization } from "@/lib/firestore";
-import { FolderOpen, FileText, UploadCloud, CheckCircle2, Clock, Loader2, Download, Unlock } from "lucide-react";
+import { FolderOpen, FileText, UploadCloud, CheckCircle2, Clock, Loader2, Download, Unlock, AlertCircle, RefreshCw } from "lucide-react";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { storage, db } from "@/lib/firebase";
 import { collection, query, orderBy, getDocs } from "firebase/firestore";
@@ -15,12 +15,13 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
   draft:               { label: "Borrador",           color: "var(--text-muted)",  bg: "var(--border-color)" },
-  processing:          { label: "Procesando",          color: "#f59e0b",            bg: "rgba(245,158,11,0.12)" },
+  processing:          { label: "Analizando…",         color: "#f59e0b",            bg: "rgba(245,158,11,0.12)" },
   review_editor:       { label: "Revisión Editor",     color: "#6366f1",            bg: "rgba(99,102,241,0.12)" },
   ready:               { label: "Revisión Editor",     color: "#6366f1",            bg: "rgba(99,102,241,0.12)" },
   review_author:       { label: "Revisión Autor",      color: "#06b6d4",            bg: "rgba(6,182,212,0.12)" },
   review_responsable:  { label: "Aprobación Final",    color: "#a855f7",            bg: "rgba(168,85,247,0.12)" },
   approved:            { label: "Aprobado",            color: "var(--success)",     bg: "rgba(16,185,129,0.12)" },
+  error:               { label: "Error en análisis",  color: "#ef4444",            bg: "rgba(239,68,68,0.12)" },
 };
 
 export default function BooksPage() {
@@ -38,6 +39,7 @@ export default function BooksPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [reopeningId, setReopeningId] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -138,6 +140,49 @@ export default function BooksPage() {
     }
   };
 
+  // ---- Trigger or re-trigger AI Worker ingestion ----
+  const triggerIngestion = async (bookId: string, orgId: string, fileUrl: string, authorId: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/ingest-book`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookId, organizationId: orgId, fileUrl, authorId })
+      });
+      if (!res.ok) {
+        const detail = await res.text().catch(() => res.statusText);
+        throw new Error(`Worker respondió ${res.status}: ${detail}`);
+      }
+      return true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("AI Worker error:", msg);
+      // Mark book as error so the user sees it and can retry
+      await updateBookStatus(orgId, bookId, "error", msg);
+      return false;
+    }
+  };
+
+  // ---- Retry analysis for a stuck/errored book ----
+  const handleRetryIngestion = async (book: Book) => {
+    if (!book.id || !book.fileUrl || !selectedOrgId) return;
+    if (!confirm(`¿Reintentar el análisis de "${book.title}"?`)) return;
+    setRetryingId(book.id);
+    try {
+      await updateBookStatus(selectedOrgId, book.id, "processing", "");
+      const ok = await triggerIngestion(book.id, selectedOrgId, book.fileUrl, book.authorId);
+      if (ok) {
+        // Worker accepted — update to processing (worker will set review_editor when done)
+        await updateBookStatus(selectedOrgId, book.id, "processing");
+      }
+      const fetchedBooks = await getBooksByOrganization(selectedOrgId);
+      setBooks(fetchedBooks);
+    } catch (err) {
+      console.error("Error reintentando:", err);
+    } finally {
+      setRetryingId(null);
+    }
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
@@ -170,6 +215,8 @@ export default function BooksPage() {
     setIsSubmitting(true);
     setUploadProgress(0);
 
+    let createdBookId: string | null = null;
+
     try {
       // 1. Upload to Firebase Storage
       const fileId = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
@@ -192,24 +239,16 @@ export default function BooksPage() {
           // 2. Get Download URL
           const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
           
-          // 3. Create Book in Firestore
-          const bookId = await createBook(selectedOrgId, user!.uid, newTitle.trim(), downloadURL, selectedFile.name);
+          // 3. Create Book in Firestore (status: 'draft' until worker confirms)
+          createdBookId = await createBook(selectedOrgId, user!.uid, newTitle.trim(), downloadURL, selectedFile!.name);
           
-          // 4. Trigger AI Worker Ingestion
-          try {
-            await fetch(`${API_URL}/api/v1/ingest-book`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                bookId,
-                organizationId: selectedOrgId,
-                fileUrl: downloadURL,
-                authorId: user!.uid
-              })
-            });
-          } catch (e) {
-            console.warn("AI Worker no disponible. Asegúrate de que está corriendo.", e);
+          // 4. Trigger AI Worker — if it fails the book is marked 'error' automatically
+          const ok = await triggerIngestion(createdBookId, selectedOrgId, downloadURL, user!.uid);
+          if (ok) {
+            // Worker confirmed → set processing (worker will later set review_editor)
+            await updateBookStatus(selectedOrgId, createdBookId, "processing");
           }
+          // If !ok, triggerIngestion already wrote 'error' status
 
           // 5. Refresh & Reset
           const fetchedBooks = await getBooksByOrganization(selectedOrgId);
@@ -220,10 +259,21 @@ export default function BooksPage() {
           setSelectedFile(null);
           setUploadProgress(0);
           setIsSubmitting(false);
+
+          if (!ok) {
+            alert(
+              "El manuscrito se subió correctamente, pero el servidor de análisis no está disponible.\n" +
+              "Puedes volver a intentarlo más tarde con el botón \"Reintentar análisis\"."
+            );
+          }
         }
       );
     } catch (err) {
       console.error(err);
+      if (createdBookId) {
+        await updateBookStatus(selectedOrgId, createdBookId, "error",
+          err instanceof Error ? err.message : "Error inesperado");
+      }
       alert("Error inesperado subiendo el manuscrito");
       setIsSubmitting(false);
     }
@@ -278,8 +328,9 @@ export default function BooksPage() {
               <div key={book.id} className="card" style={{ padding: "1.5rem", display: "flex", flexDirection: "column" }}>
                 <div style={{ marginBottom: "1rem" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.625rem" }}>
-                    <span style={{ fontSize: "0.7rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", padding: "0.2rem 0.6rem", borderRadius: "99px", backgroundColor: sc.bg, color: sc.color }}>
-                      {book.status === 'processing' && <Loader2 size={10} style={{ display: 'inline', marginRight: '0.25rem', animation: 'spin 1s linear infinite' }} />}
+                    <span style={{ fontSize: "0.7rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", padding: "0.2rem 0.6rem", borderRadius: "99px", backgroundColor: sc.bg, color: sc.color, display: "flex", alignItems: "center", gap: "0.25rem" }}>
+                      {book.status === 'processing' && <Loader2 size={10} style={{ animation: 'spin 1s linear infinite' }} />}
+                      {book.status === 'error' && <AlertCircle size={10} />}
                       {sc.label}
                     </span>
                     <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "0.25rem" }}>
@@ -292,9 +343,32 @@ export default function BooksPage() {
                       <FileText size={12} /> {book.fileName}
                     </p>
                   )}
+                  {/* Error message for failed ingestions */}
+                  {book.status === 'error' && (
+                    <p style={{ fontSize: "0.7rem", color: "#ef4444", marginTop: "0.5rem", padding: "0.4rem 0.6rem", background: "rgba(239,68,68,0.08)", borderRadius: "var(--radius)", borderLeft: "2px solid #ef4444" }}>
+                      El servidor de análisis no pudo procesar este manuscrito. Puedes volver a intentarlo.
+                    </p>
+                  )}
                 </div>
 
                 <div style={{ marginTop: "auto", paddingTop: "0.875rem", borderTop: "1px solid var(--border-color)", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  {/* Retry button for error or stuck-processing books */}
+                  {(book.status === 'error' || book.status === 'draft') && book.fileUrl && (
+                    <button
+                      className="btn"
+                      style={{
+                        width: "100%", fontSize: "0.8125rem",
+                        backgroundColor: "#ef4444", display: "flex",
+                        alignItems: "center", justifyContent: "center", gap: "0.375rem",
+                      }}
+                      onClick={() => handleRetryIngestion(book)}
+                      disabled={retryingId === book.id}
+                    >
+                      {retryingId === book.id
+                        ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Reintentando...</>
+                        : <><RefreshCw size={14} /> Reintentar análisis</>}
+                    </button>
+                  )}
                   {book.status === "approved" && (
                     <>
                       <button
@@ -327,13 +401,15 @@ export default function BooksPage() {
                       </button>
                     </>
                   )}
-                  <Link
-                    href={`/dashboard/editor?bookId=${book.id}`}
-                    className="btn btn-secondary"
-                    style={{ textDecoration: "none", width: "100%", fontSize: "0.8125rem", display: "block", textAlign: "center" }}
-                  >
-                    {book.status === "approved" ? "Ver en Editor" : "Abrir Editor →"}
-                  </Link>
+                  {book.status !== 'error' && book.status !== 'draft' && (
+                    <Link
+                      href={`/dashboard/editor?bookId=${book.id}`}
+                      className="btn btn-secondary"
+                      style={{ textDecoration: "none", width: "100%", fontSize: "0.8125rem", display: "block", textAlign: "center" }}
+                    >
+                      {book.status === "approved" ? "Ver en Editor" : "Abrir Editor →"}
+                    </Link>
+                  )}
                 </div>
               </div>
             );

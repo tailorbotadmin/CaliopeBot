@@ -57,7 +57,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { href: "/dashboard", label: "Panel", icon: LayoutDashboard, roles: null },
     { href: "/dashboard/corrections", label: "Mis Correcciones", icon: FileCheck, roles: null },
     { href: "/dashboard/books", label: "Mis Manuscritos", icon: BookOpen, roles: null },
-    { href: "/dashboard/training", label: "Entrenamiento", icon: GraduationCap, roles: ["SuperAdmin", "Admin", "Responsable_Editorial", "Responsable Editorial"] },
+    { href: "/dashboard/training", label: "Entrenamiento", icon: GraduationCap, roles: ["SuperAdmin"] },
     { href: "/dashboard/reports", label: "Reportes", icon: BarChart3, roles: ["SuperAdmin", "Admin", "Responsable_Editorial", "Responsable Editorial"] },
   ];
 

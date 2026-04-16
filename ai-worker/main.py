@@ -732,12 +732,8 @@ async def seed_rae_rules_endpoint(request: SeedRAERulesRequest, raw_req: Request
         if decoded_token.get("role") != "SuperAdmin":
             raise HTTPException(status_code=403, detail="Only SuperAdmins can seed RAE rules")
 
-        # Import the RAE corpus defined in the seed script
-        import sys, os
-        scripts_dir = os.path.join(os.path.dirname(__file__), "scripts")
-        if scripts_dir not in sys.path:
-            sys.path.insert(0, scripts_dir)
-        from seed_rae_rules import RAE_RULES  # type: ignore
+        # Import the RAE corpus from the pure data module (no Firebase side-effects)
+        from rae_rules_corpus import RAE_RULES  # noqa: PLC0415
 
         org_ref = db.collection("organizations").document(request.organizationId)
 

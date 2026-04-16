@@ -3,10 +3,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { getBooksByOrganization, getOrganizations, createBook, updateBookStatus, Book, Organization } from "@/lib/firestore";
-import { FolderOpen, FileText, UploadCloud, CheckCircle2, Clock, Loader2, Download, Unlock, AlertCircle, RefreshCw } from "lucide-react";
-import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import { FolderOpen, FileText, UploadCloud, CheckCircle2, Clock, Loader2, Download, Unlock, AlertCircle, RefreshCw, Trash2 } from "lucide-react";
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { storage, db } from "@/lib/firebase";
-import { collection, query, orderBy, getDocs } from "firebase/firestore";
+import { collection, query, orderBy, getDocs, doc, deleteDoc } from "firebase/firestore";
 import { Document, Packer, Paragraph, TextRun } from "docx";
 import { saveAs } from "file-saver";
 import Link from "next/link";
@@ -40,6 +40,7 @@ export default function BooksPage() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [reopeningId, setReopeningId] = useState<string | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -137,6 +138,38 @@ export default function BooksPage() {
       alert("No se pudo reabrir la edición.");
     } finally {
       setReopeningId(null);
+    }
+  };
+
+  // ---- Delete book ----
+  const handleDeleteBook = async (book: Book) => {
+    if (!book.id || !selectedOrgId) return;
+    if (!confirm(`¿Eliminar el manuscrito "${book.title}" permanentemente?\nEsta acción no se puede deshacer.`)) return;
+    setDeletingId(book.id);
+    try {
+      // Delete Firestore chunks subcollection then the book doc
+      const chunksRef = collection(db, "organizations", selectedOrgId, "books", book.id, "chunks");
+      const chunksSnap = await getDocs(chunksRef);
+      const delChunks = chunksSnap.docs.map(d => deleteDoc(d.ref));
+      await Promise.all(delChunks);
+      await deleteDoc(doc(db, "organizations", selectedOrgId, "books", book.id));
+
+      // Try to delete the Storage file (best-effort)
+      if (book.fileUrl) {
+        try {
+          const fileRef = ref(storage, book.fileUrl);
+          await deleteObject(fileRef);
+        } catch {
+          // Ignore if already deleted or permission error
+        }
+      }
+
+      setBooks(prev => prev.filter(b => b.id !== book.id));
+    } catch (err) {
+      console.error("Error eliminando manuscrito:", err);
+      alert("No se pudo eliminar el manuscrito.");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -303,10 +336,10 @@ export default function BooksPage() {
         </button>
       </div>
 
-      {/* Org Selector for SuperAdmins */}
+      {/* Editorial Selector for SuperAdmins */}
       {role === "SuperAdmin" && orgs.length > 0 && (
         <div className="card-static" style={{ marginBottom: "1.5rem", padding: "1rem 1.25rem", display: "flex", alignItems: "center", gap: "1rem" }}>
-          <label style={{ fontWeight: 600, fontSize: "0.875rem", color: "var(--text-main)", whiteSpace: "nowrap" }}>Entorno:</label>
+          <label style={{ fontWeight: 600, fontSize: "0.875rem", color: "var(--text-main)", whiteSpace: "nowrap" }}>Editorial:</label>
           <select className="input" value={selectedOrgId} onChange={handleOrgChange} style={{ maxWidth: "280px" }}>
             {orgs.map(org => (
               <option key={org.id} value={org.id}>{org.name}</option>
@@ -315,106 +348,163 @@ export default function BooksPage() {
         </div>
       )}
 
-      {/* Books Grid */}
+      {/* Books List */}
       {books.length === 0 ? (
         <div className="card-static" style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "4rem 2rem", textAlign: "center" }}>
           <div style={{ width: "56px", height: "56px", borderRadius: "var(--radius-lg)", backgroundColor: "var(--primary-light)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "1.25rem", color: "var(--primary)" }}>
             <FolderOpen size={28} strokeWidth={1.75} />
           </div>
-          <h3 style={{ fontSize: "1.125rem", fontWeight: 700, color: "var(--text-main)" }}>No hay manuscritos en esta organización</h3>
+          <h3 style={{ fontSize: "1.125rem", fontWeight: 700, color: "var(--text-main)" }}>No hay manuscritos en esta editorial</h3>
           <p style={{ color: "var(--text-muted)", marginTop: "0.5rem", fontSize: "0.875rem" }}>Sube el primer documento para comenzar el proceso de corrección.</p>
         </div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "1.25rem" }}>
-          {books.map(book => {
+        <div className="card-static" style={{ overflow: "hidden", padding: 0 }}>
+          {/* List header */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 140px 120px 100px",
+            padding: "0.625rem 1.25rem",
+            borderBottom: "1px solid var(--border-color)",
+            fontSize: "0.7rem",
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: "0.05em",
+            color: "var(--text-muted)",
+          }}>
+            <span>Manuscrito</span>
+            <span>Estado</span>
+            <span>Fecha</span>
+            <span style={{ textAlign: "right" }}>Acciones</span>
+          </div>
+
+          {books.map((book, idx) => {
             const sc = STATUS_CONFIG[book.status] ?? STATUS_CONFIG.draft;
-            const dateStr = book.createdAt?.toDate ? book.createdAt.toDate().toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+            const dateStr = book.createdAt?.toDate
+              ? book.createdAt.toDate().toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })
+              : '—';
+            const isLast = idx === books.length - 1;
             return (
-              <div key={book.id} className="card" style={{ padding: "1.5rem", display: "flex", flexDirection: "column" }}>
-                <div style={{ marginBottom: "1rem" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.625rem" }}>
-                    <span style={{ fontSize: "0.7rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", padding: "0.2rem 0.6rem", borderRadius: "99px", backgroundColor: sc.bg, color: sc.color, display: "flex", alignItems: "center", gap: "0.25rem" }}>
-                      {book.status === 'processing' && <Loader2 size={10} style={{ animation: 'spin 1s linear infinite' }} />}
-                      {book.status === 'error' && <AlertCircle size={10} />}
-                      {sc.label}
-                    </span>
-                    <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "0.25rem" }}>
-                      <Clock size={11} /> {dateStr}
+              <div
+                key={book.id}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 140px 120px 100px",
+                  padding: "0.875rem 1.25rem",
+                  alignItems: "center",
+                  borderBottom: isLast ? "none" : "1px solid var(--border-color)",
+                  transition: "background 0.15s",
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = "var(--bg-color)")}
+                onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+              >
+                {/* Title + filename */}
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.2rem" }}>
+                    <FileText size={15} style={{ color: "var(--primary)", flexShrink: 0 }} />
+                    <span style={{ fontWeight: 700, fontSize: "0.9375rem", color: "var(--text-main)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {book.title}
                     </span>
                   </div>
-                  <h3 style={{ fontSize: "1.0625rem", fontWeight: 700, color: "var(--text-main)", lineHeight: 1.3 }}>{book.title}</h3>
                   {book.fileName && (
-                    <p style={{ display: "flex", alignItems: "center", gap: "0.25rem", fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.4rem" }}>
-                      <FileText size={12} /> {book.fileName}
-                    </p>
+                    <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", paddingLeft: "1.4rem" }}>{book.fileName}</span>
                   )}
-                  {/* Error message for failed ingestions */}
                   {book.status === 'error' && (
-                    <p style={{ fontSize: "0.7rem", color: "#ef4444", marginTop: "0.5rem", padding: "0.4rem 0.6rem", background: "rgba(239,68,68,0.08)", borderRadius: "var(--radius)", borderLeft: "2px solid #ef4444" }}>
-                      El servidor de análisis no pudo procesar este manuscrito. Puedes volver a intentarlo.
+                    <p style={{ fontSize: "0.68rem", color: "#ef4444", marginTop: "0.25rem", paddingLeft: "1.4rem" }}>
+                      Error en el análisis — usa Reintentar
                     </p>
                   )}
                 </div>
 
-                <div style={{ marginTop: "auto", paddingTop: "0.875rem", borderTop: "1px solid var(--border-color)", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                  {/* Retry button for error or stuck-processing books */}
+                {/* Status badge */}
+                <div>
+                  <span style={{
+                    display: "inline-flex", alignItems: "center", gap: "0.25rem",
+                    fontSize: "0.68rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em",
+                    padding: "0.2rem 0.5rem", borderRadius: "99px",
+                    backgroundColor: sc.bg, color: sc.color,
+                  }}>
+                    {book.status === 'processing' && <Loader2 size={9} style={{ animation: 'spin 1s linear infinite' }} />}
+                    {book.status === 'error' && <AlertCircle size={9} />}
+                    {sc.label}
+                  </span>
+                </div>
+
+                {/* Date */}
+                <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "0.3rem" }}>
+                  <Clock size={11} />{dateStr}
+                </div>
+
+                {/* Actions */}
+                <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "0.375rem" }}>
+                  {/* Retry */}
                   {(book.status === 'error' || book.status === 'draft') && book.fileUrl && (
                     <button
-                      className="btn"
-                      style={{
-                        width: "100%", fontSize: "0.8125rem",
-                        backgroundColor: "#ef4444", display: "flex",
-                        alignItems: "center", justifyContent: "center", gap: "0.375rem",
-                      }}
+                      title="Reintentar análisis"
+                      className="btn btn-secondary"
+                      style={{ padding: "0.3rem 0.5rem", fontSize: "0.75rem", display: "flex", alignItems: "center", gap: "0.25rem" }}
                       onClick={() => handleRetryIngestion(book)}
                       disabled={retryingId === book.id}
                     >
                       {retryingId === book.id
-                        ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Reintentando...</>
-                        : <><RefreshCw size={14} /> Reintentar análisis</>}
+                        ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
+                        : <RefreshCw size={13} />}
                     </button>
                   )}
-                  {book.status === "approved" && (
-                    <>
-                      <button
-                        className="btn"
-                        style={{
-                          width: "100%", fontSize: "0.8125rem",
-                          backgroundColor: "var(--success)", display: "flex",
-                          alignItems: "center", justifyContent: "center", gap: "0.375rem",
-                        }}
-                        onClick={() => handleDownloadEditedDocx(book)}
-                        disabled={downloadingId === book.id}
-                      >
-                        {downloadingId === book.id
-                          ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Generando...</>
-                          : <><Download size={14} /> Descargar Editado</>}
-                      </button>
-                      <button
-                        className="btn btn-secondary"
-                        style={{
-                          width: "100%", fontSize: "0.8125rem",
-                          display: "flex", alignItems: "center", justifyContent: "center", gap: "0.375rem",
-                          borderColor: "#f59e0b", color: "#f59e0b",
-                        }}
-                        onClick={() => handleReopenEditing(book)}
-                        disabled={reopeningId === book.id}
-                      >
-                        {reopeningId === book.id
-                          ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Reabriendo...</>
-                          : <><Unlock size={14} /> Reabrir Edición</>}
-                      </button>
-                    </>
-                  )}
+
+                  {/* Open editor */}
                   {book.status !== 'error' && book.status !== 'draft' && (
                     <Link
                       href={`/dashboard/editor?bookId=${book.id}`}
+                      title={book.status === 'approved' ? 'Ver en Editor' : 'Abrir Editor'}
                       className="btn btn-secondary"
-                      style={{ textDecoration: "none", width: "100%", fontSize: "0.8125rem", display: "block", textAlign: "center" }}
+                      style={{ padding: "0.3rem 0.6rem", fontSize: "0.78rem", textDecoration: "none", display: "inline-flex", alignItems: "center" }}
                     >
-                      {book.status === "approved" ? "Ver en Editor" : "Abrir Editor →"}
+                      {book.status === 'approved' ? 'Ver' : 'Editar →'}
                     </Link>
                   )}
+
+                  {/* Download edited docx (approved) */}
+                  {book.status === 'approved' && (
+                    <button
+                      title="Descargar editado"
+                      className="btn"
+                      style={{ padding: "0.3rem 0.5rem", fontSize: "0.75rem", backgroundColor: "var(--success)", display: "flex", alignItems: "center" }}
+                      onClick={() => handleDownloadEditedDocx(book)}
+                      disabled={downloadingId === book.id}
+                    >
+                      {downloadingId === book.id
+                        ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
+                        : <Download size={13} />}
+                    </button>
+                  )}
+
+                  {/* Reopen editing */}
+                  {book.status === 'approved' && (
+                    <button
+                      title="Reabrir edición"
+                      className="btn btn-secondary"
+                      style={{ padding: "0.3rem 0.5rem", fontSize: "0.75rem", display: "flex", alignItems: "center", borderColor: "#f59e0b", color: "#f59e0b" }}
+                      onClick={() => handleReopenEditing(book)}
+                      disabled={reopeningId === book.id}
+                    >
+                      {reopeningId === book.id
+                        ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
+                        : <Unlock size={13} />}
+                    </button>
+                  )}
+
+                  {/* Delete */}
+                  <button
+                    title="Eliminar manuscrito"
+                    className="btn btn-secondary"
+                    style={{ padding: "0.3rem 0.5rem", fontSize: "0.75rem", display: "flex", alignItems: "center", borderColor: "#ef4444", color: "#ef4444" }}
+                    onClick={() => handleDeleteBook(book)}
+                    disabled={deletingId === book.id}
+                  >
+                    {deletingId === book.id
+                      ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
+                      : <Trash2 size={13} />}
+                  </button>
                 </div>
               </div>
             );

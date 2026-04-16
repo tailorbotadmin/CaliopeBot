@@ -14,8 +14,8 @@ import {
 
 import { db } from './firebase';
 
-// 'Admin' kept for backward-compat with existing tokens; Responsable_Editorial is now the admin-level role
-export type Role = 'SuperAdmin' | 'Admin' | 'Responsable_Editorial' | 'Editor' | 'Autor' | 'Traductor';
+export type Role = 'SuperAdmin' | 'Responsable_Editorial' | 'Editor' | 'Autor' | 'Traductor';
+
 
 // Firestore timestamps come back as Timestamp on read, but we write with serverTimestamp() (FieldValue).
 // We use Timestamp here for strict read typing; write operations are safe since setDoc/updateDoc accept both.

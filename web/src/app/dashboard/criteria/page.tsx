@@ -93,7 +93,7 @@ export default function CriteriaPage() {
   const [seedResult, setSeedResult] = useState<string | null>(null);
   const [isTranslating, setIsTranslating] = useState(false);
 
-  const canManage = role === "SuperAdmin" || role === "Admin" || role === "Responsable_Editorial";
+  const canManage = role === "SuperAdmin" || role === "Responsable_Editorial";
 
   // Load orgs for SuperAdmin
   useEffect(() => {

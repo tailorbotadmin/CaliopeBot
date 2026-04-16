@@ -46,7 +46,7 @@ export default function OrganizationsPage() {
 
   useEffect(() => {
     if (!loading) {
-      if (role !== "SuperAdmin" && role !== "Admin" && role !== "Responsable_Editorial") {
+      if (role !== "SuperAdmin" && role !== "Responsable_Editorial") {
         router.push("/dashboard");
         return;
       }

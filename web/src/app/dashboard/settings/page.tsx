@@ -38,7 +38,7 @@ export default function SettingsPage() {
   const [deletingOrg, setDeletingOrg] = useState(false);
 
   // Responsable_Editorial is now the admin-level role ('Admin' kept for backward-compat)
-  const isAdmin = realRole === "SuperAdmin" || realRole === "Admin" || realRole === "Responsable_Editorial";
+  const isAdmin = realRole === "SuperAdmin" || realRole === "Responsable_Editorial";
   // SuperAdmin sections are only visible when NOT impersonating
   const isSuperAdmin = realRole === "SuperAdmin" && !impersonated;
 
@@ -325,7 +325,7 @@ export default function SettingsPage() {
                 const isMe = member.uid === user?.uid;
                 const canEdit = (role === "SuperAdmin")
                   || ((role === "Admin" || role === "Responsable_Editorial")
-                    && member.role !== "SuperAdmin" && member.role !== "Admin" && member.role !== "Responsable_Editorial");
+                    && member.role !== "SuperAdmin" && member.role !== "Responsable_Editorial");
                 return (
                   <tr key={member.uid} style={{ borderBottom: i < members.length - 1 ? "1px solid var(--border-color)" : "none", backgroundColor: isMe ? "rgba(99,102,241,0.03)" : "transparent" }}>
                     {/* Name */}

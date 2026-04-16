@@ -119,7 +119,7 @@ export default function TrainingPage() {
     URL.revokeObjectURL(url);
   };
 
-  const canManage = role === "SuperAdmin" || role === "Admin";
+  const canManage = role === "SuperAdmin";
 
   const pending = items.filter(i => i.status === "pending").length;
   const approved = items.filter(i => i.status === "approved").length;

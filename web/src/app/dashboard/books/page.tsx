@@ -31,7 +31,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }
 };
 
 // Admin kept for backward-compat with existing tokens; Responsable_Editorial is the canonical admin role
-const ADMIN_ROLES = ["SuperAdmin", "Admin", "Responsable_Editorial"];
+const ADMIN_ROLES = ["SuperAdmin", "Responsable_Editorial"];
 
 export default function BooksPage() {
   const { user, role, organizationId, loading } = useAuth();

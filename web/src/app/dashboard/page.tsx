@@ -185,7 +185,7 @@ export default function DashboardPage() {
 
           <div style={{ display: "flex", flexDirection: "column", gap: "0.625rem" }}>
             {/* Step 1 — Criteria (Admin/SuperAdmin only) */}
-            {(role === "SuperAdmin" || role === "Admin" || role === "Responsable_Editorial") && (
+            {(role === "SuperAdmin" || role === "Responsable_Editorial") && (
               <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem 1rem", borderRadius: "var(--radius-md)", backgroundColor: "var(--surface-color)", border: "1px solid var(--border-color)" }}>
                 <CheckCircle2 size={18} style={{ color: "var(--primary)", flexShrink: 0 }} />
                 <div style={{ flex: 1 }}>
@@ -301,7 +301,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Styles Card */}
-        {(role === "SuperAdmin" || role === "Admin" || role === "Responsable_Editorial") && (
+        {(role === "SuperAdmin" || role === "Responsable_Editorial") && (
           <div className="card" style={{ padding: "1.75rem" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.75rem" }}>
               <Palette size={22} strokeWidth={1.75} style={{ color: "var(--primary)" }} />
@@ -317,7 +317,7 @@ export default function DashboardPage() {
         )}
 
         {/* Reports Card */}
-        {(role === "SuperAdmin" || role === "Admin" || role === "Responsable_Editorial") && (
+        {(role === "SuperAdmin" || role === "Responsable_Editorial") && (
           <div className="card" style={{ padding: "1.75rem" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.75rem" }}>
               <TrendingUp size={22} strokeWidth={1.75} style={{ color: "var(--primary)" }} />

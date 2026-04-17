@@ -313,7 +313,7 @@ export default function BooksPage() {
   // Retry analysis for stuck books (status=processing, chunks already exist)
   const handleRetryAnalysis = async (book: Book) => {
     if (!book.id || !selectedOrgId) return;
-    if (!confirm(`¿Reiniciar el análisis de "${book.title}" con el pipeline V2?`)) return;
+    // No confirm() — blocks silently in production/CSP environments
     setRetryingId(book.id);
     try {
       const token = await user?.getIdToken();
@@ -329,9 +329,12 @@ export default function BooksPage() {
       if (res.ok) {
         const data = await res.json();
         console.log("Retry triggered:", data);
+        // Refresh book list to reflect new status
+        const fetchedBooks = await getBooksByOrganization(selectedOrgId);
+        setBooks(fetchedBooks);
       } else {
-        const err = await res.json();
-        alert(`Error al reintentar: ${err.detail ?? res.statusText}`);
+        const errBody = await res.json().catch(() => ({}));
+        alert(`Error al reintentar: ${errBody.detail ?? res.statusText}`);
       }
     } catch (err) {
       console.error("Error en retryAnalysis:", err);
@@ -549,7 +552,8 @@ export default function BooksPage() {
           {/* List header */}
           <div style={{
             display: "grid",
-            gridTemplateColumns: "2fr 130px 180px 120px 95px 130px",
+            gridTemplateColumns: "1fr 100px 150px 105px 80px 145px",
+            gap: "0 0.5rem",
             padding: "0.625rem 1.25rem",
             borderBottom: "1px solid var(--border-color)",
             fontSize: "0.7rem",
@@ -577,7 +581,8 @@ export default function BooksPage() {
                 key={book.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "2fr 130px 180px 120px 95px 130px",
+                  gridTemplateColumns: "1fr 100px 150px 105px 80px 145px",
+                  gap: "0 0.5rem",
                   padding: "0.875rem 1.25rem",
                   alignItems: "center",
                   borderBottom: isLast ? "none" : "1px solid var(--border-color)",

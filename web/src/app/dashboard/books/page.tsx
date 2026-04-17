@@ -310,6 +310,38 @@ export default function BooksPage() {
     }
   };
 
+  // Retry analysis for stuck books (status=processing, chunks already exist)
+  const handleRetryAnalysis = async (book: Book) => {
+    if (!book.id || !selectedOrgId) return;
+    if (!confirm(`¿Reiniciar el análisis de "${book.title}" con el pipeline V2?`)) return;
+    setRetryingId(book.id);
+    try {
+      const token = await user?.getIdToken();
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/retry-book`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({
+          organizationId: selectedOrgId,
+          bookId: book.id,
+          authorId: book.authorId ?? "",
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        console.log("Retry triggered:", data);
+      } else {
+        const err = await res.json();
+        alert(`Error al reintentar: ${err.detail ?? res.statusText}`);
+      }
+    } catch (err) {
+      console.error("Error en retryAnalysis:", err);
+      alert("Error al conectar con el servidor de análisis.");
+    } finally {
+      setRetryingId(null);
+    }
+  };
+
+
   // ---- Add new author ----
   const handleAddAuthor = async () => {
     if (!newAuthorName.trim() || !selectedOrgId) return;
@@ -582,13 +614,28 @@ export default function BooksPage() {
 
                 {/* Actions */}
                 <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "0.375rem" }}>
-                  {/* Retry */}
+                  {/* Retry — for error/draft: full re-ingestion */}
                   {(book.status === "error" || book.status === "draft") && book.fileUrl && (
                     <button
-                      title="Reintentar análisis"
+                      title="Reintentar análisis (re-ingesta)"
                       className="btn btn-secondary"
                       style={{ padding: "0.3rem 0.5rem", fontSize: "0.75rem", display: "flex", alignItems: "center", gap: "0.25rem" }}
                       onClick={() => handleRetryIngestion(book)}
+                      disabled={retryingId === book.id}
+                    >
+                      {retryingId === book.id
+                        ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
+                        : <RefreshCw size={13} />}
+                    </button>
+                  )}
+
+                  {/* Retry — for stuck processing: re-trigger analysis without re-ingestion */}
+                  {book.status === "processing" && (
+                    <button
+                      title="El análisis parece bloqueado. Haz clic para reiniciarlo."
+                      className="btn btn-secondary"
+                      style={{ padding: "0.3rem 0.5rem", fontSize: "0.75rem", display: "flex", alignItems: "center", gap: "0.25rem", color: "#f59e0b", borderColor: "rgba(245,158,11,0.4)" }}
+                      onClick={() => handleRetryAnalysis(book)}
                       disabled={retryingId === book.id}
                     >
                       {retryingId === book.id

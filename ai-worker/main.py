@@ -440,6 +440,69 @@ async def process_book_background(org_id: str, book_id: str, author_id: str):
         ACTIVE_JOBS.dec()
 
 
+class RetryBookRequest(BaseModel):
+    organizationId: str
+    bookId: str
+    authorId: str = ""
+
+
+@app.post("/api/v1/retry-book")
+async def retry_book(request: RetryBookRequest, background_tasks: BackgroundTasks, raw_req: Request):
+    """Re-trigger analysis for a stuck book (all pending chunks, no re-ingestion)."""
+    auth_header = raw_req.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            from firebase_admin import auth as fauth
+            decoded = fauth.verify_id_token(auth_header.split("Bearer ")[1])
+            role = decoded.get("role", "")
+            if role not in ["SuperAdmin", "Responsable_Editorial", "Editor"]:
+                raise HTTPException(status_code=403, detail="Forbidden")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+    org_id  = request.organizationId
+    book_id = request.bookId
+    author_id = request.authorId
+
+    book_ref = (
+        db.collection("organizations").document(org_id)
+        .collection("books").document(book_id)
+    )
+    book_snap = book_ref.get()
+    if not book_snap.exists:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    chunks_ref = book_ref.collection("chunks")
+
+    # Reset any stuck chunks back to pending
+    all_chunks = list(chunks_ref.stream())
+    pending_count = sum(1 for c in all_chunks if c.to_dict().get("status") == "pending")
+    total = len(all_chunks)
+
+    if pending_count == 0:
+        raise HTTPException(status_code=400, detail="No pending chunks — book may already be processed")
+
+    # Mark book as processing and clear old voiceProfile so it's regenerated
+    book_ref.update({
+        "status": "processing",
+        "processedChunks": total - pending_count,
+        "totalChunks": total,
+        "voiceProfile": None,   # force re-extraction with new V2 analyzer
+    })
+
+    background_tasks.add_task(process_book_background, org_id, book_id, author_id)
+    logger.info(f"Retry triggered: book={book_id}, pending={pending_count}/{total}")
+
+    return {
+        "status": "retrying",
+        "bookId": book_id,
+        "totalChunks": total,
+        "pendingChunks": pending_count,
+    }
+
+
 @app.post("/api/v1/ingest-book")
 async def ingest_book(request: IngestRequest, background_tasks: BackgroundTasks):
     """Parse DOCX manuscript and create chunks in Firestore."""

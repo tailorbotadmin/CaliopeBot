@@ -160,9 +160,9 @@ jobs:
       - name: Install firebase-tools
         run: npm install -g firebase-tools
 
-      - name: Deploy Firebase Hosting (rewrite → Cloud Run)
+      - name: Deploy Firebase Hosting + Firestore Rules
         run: |
-          firebase deploy --only hosting \
+          firebase deploy --only hosting,firestore:rules \
             --project ${{ env.PROJECT_ID }} \
             --non-interactive
 

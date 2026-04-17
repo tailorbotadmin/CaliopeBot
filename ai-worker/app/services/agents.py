@@ -13,6 +13,7 @@ import json
 import uuid
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import List, Dict, Optional
 from google.genai import types
 
@@ -31,18 +32,23 @@ logger = logging.getLogger(__name__)
 class BaseAgent:
     """Base class with LLM call, retry and metrics."""
 
-    def __init__(self, client, model: str = "gemini-2.5-flash", name: str = "base"):
+    def __init__(self, client, model: str = "gemini-2.0-flash-001", name: str = "base"):
         self.client = client
         self.model = model
         self.name = name
 
+    LLM_CALL_TIMEOUT: int = 90     # seconds per individual LLM request
+    LLM_MAX_RETRIES:  int = 3       # retries per agent call
+    LLM_RETRY_WAIT:   float = 3.0   # base wait between retries
+
     def _call_llm(self, prompt: str, json_schema=None, temperature: float = 0.2) -> str:
+        """Call the LLM with timeout and retry. Raises on all-retries exhausted."""
         if not self.client:
             return self._mock_response(prompt)
 
-        LLM_CALLS.labels(agent=self.name, model=self.model).inc()
-        start = time.time()
-        try:
+        def _do_call():
+            LLM_CALLS.labels(agent=self.name, model=self.model).inc()
+            start = time.time()
             config = types.GenerateContentConfig(
                 response_mime_type="application/json" if json_schema else "text/plain",
                 **({"response_schema": json_schema} if json_schema else {}),
@@ -55,10 +61,31 @@ class BaseAgent:
             LLM_LATENCY.labels(agent=self.name, model=self.model).observe(duration)
             logger.info(f"[{self.name}] LLM call: {duration:.2f}s")
             return response.text.strip()
-        except Exception as e:
-            LLM_ERRORS.labels(agent=self.name, model=self.model).inc()
-            logger.error(f"[{self.name}] LLM error: {e}")
-            raise
+
+        last_err = None
+        for attempt in range(1, self.LLM_MAX_RETRIES + 1):
+            try:
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(_do_call)
+                    result = future.result(timeout=self.LLM_CALL_TIMEOUT)
+                return result
+            except FuturesTimeoutError:
+                last_err = TimeoutError(f"LLM call timed out after {self.LLM_CALL_TIMEOUT}s")
+                LLM_ERRORS.labels(agent=self.name, model=self.model).inc()
+                logger.warning(f"[{self.name}] Attempt {attempt}: LLM timeout (>{self.LLM_CALL_TIMEOUT}s)")
+            except Exception as e:
+                last_err = e
+                LLM_ERRORS.labels(agent=self.name, model=self.model).inc()
+                logger.warning(f"[{self.name}] Attempt {attempt}: LLM error: {e}")
+
+            if attempt < self.LLM_MAX_RETRIES:
+                wait = self.LLM_RETRY_WAIT * attempt
+                logger.info(f"[{self.name}] Retrying in {wait:.1f}s...")
+                time.sleep(wait)
+
+        logger.error(f"[{self.name}] All {self.LLM_MAX_RETRIES} attempts failed. Last error: {last_err}")
+        raise last_err
+
 
     def _mock_response(self, prompt: str) -> str:
         return "[]"
@@ -85,7 +112,7 @@ class VoiceAnalyzerAgent(BaseAgent):
         "required": ["resumen", "rasgos_clave", "instrucciones_agentes"],
     }
 
-    def __init__(self, client, model: str = "gemini-2.5-flash"):
+    def __init__(self, client, model: str = "gemini-2.0-flash-001"):
         super().__init__(client, model, name="voice_analyzer")
 
     def run(self, sample_paragraphs: List[str]) -> Dict:
@@ -160,7 +187,7 @@ class CorrectorAgent(BaseAgent):
         },
     }
 
-    def __init__(self, client, vector_store=None, model: str = "gemini-2.5-flash"):
+    def __init__(self, client, vector_store=None, model: str = "gemini-2.0-flash-001"):
         super().__init__(client, model, name="corrector")
         self.vector_store = vector_store
 
@@ -257,7 +284,7 @@ class RevisorAgent(BaseAgent):
         },
     }
 
-    def __init__(self, client, vector_store=None, model: str = "gemini-2.5-flash"):
+    def __init__(self, client, vector_store=None, model: str = "gemini-2.0-flash-001"):
         super().__init__(client, model, name="revisor")
         self.vector_store = vector_store
 
@@ -353,7 +380,7 @@ class ArbiterAgent(BaseAgent):
         },
     }
 
-    def __init__(self, client, vector_store=None, model: str = "gemini-2.5-flash"):
+    def __init__(self, client, vector_store=None, model: str = "gemini-2.0-flash-001"):
         super().__init__(client, model, name="arbiter")
         self.vector_store = vector_store
 

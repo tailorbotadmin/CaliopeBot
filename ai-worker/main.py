@@ -9,6 +9,7 @@ import re
 import json
 import uuid
 import logging
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import List, Dict
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
@@ -338,20 +339,26 @@ async def process_book_background(org_id: str, book_id: str, author_id: str):
             data = chunk.to_dict()
             text = data["text"]
 
-            # ── LanguageTool (deterministic RAE) ──────────────────────────────
+            # Per-chunk try/except: one bad chunk must NOT kill the whole book
             try:
-                lt_matches = tool.check(text)
-            except Exception:
-                lt_matches = []
-            lt_errors = [
-                {
-                    "rule": m.ruleId,
-                    "message": m.message,
-                    "replacements": m.replacements[:3],
-                    "context": text[m.offset:m.offset + m.errorLength],
-                }
-                for m in lt_matches
-            ]
+                # ── LanguageTool (deterministic RAE) — 15s timeout ────────────
+                try:
+                    with ThreadPoolExecutor(max_workers=1) as _lt_exec:
+                        _lt_future = _lt_exec.submit(tool.check, text)
+                        lt_matches = _lt_future.result(timeout=15)
+                except (FuturesTimeoutError, Exception) as lt_err:
+                    logger.warning(f"[book={book_id} chunk={chunk.id}] LanguageTool skipped: {lt_err}")
+                    lt_matches = []
+
+                lt_errors = [
+                    {
+                        "rule": m.ruleId,
+                        "message": m.message,
+                        "replacements": m.replacements[:3],
+                        "context": text[m.offset:m.offset + m.errorLength],
+                    }
+                    for m in lt_matches
+                ]
 
             # ── CorrectorAgent ────────────────────────────────────────────────
             corrections = corrector.run(text, org_id, author_id, voice_profile)
@@ -409,14 +416,25 @@ async def process_book_background(org_id: str, book_id: str, author_id: str):
                     final_suggestions = approved
             # If no corrections from either agent, final_suggestions stays []
 
-            # ── Commit this chunk immediately (progressive loading) ────────────
-            chunks_ref.document(chunk.id).update({
-                "status": "processed",
-                "suggestions": final_suggestions,
-            })
-            processed_count += 1
-            book_ref.update({"processedChunks": processed_count})
-            logger.info(f"book={book_id}: chunk {processed_count}/{len(pending)} done ({len(final_suggestions)} suggestions)")
+                # ── Commit this chunk immediately (progressive loading) ────────
+                chunks_ref.document(chunk.id).update({
+                    "status": "processed",
+                    "suggestions": final_suggestions,
+                })
+                processed_count += 1
+                book_ref.update({"processedChunks": processed_count})
+                logger.info(f"book={book_id}: chunk {processed_count}/{len(pending)} done ({len(final_suggestions)} suggestions)")
+
+            except Exception as chunk_err:
+                # ONE chunk failure must NOT kill the whole book pipeline
+                logger.error(f"[book={book_id} chunk={chunk.id}] Chunk failed, skipping: {chunk_err}", exc_info=True)
+                chunks_ref.document(chunk.id).update({
+                    "status": "processed",
+                    "suggestions": [],
+                    "_chunkError": str(chunk_err)[:300],
+                })
+                processed_count += 1
+                book_ref.update({"processedChunks": processed_count})
 
         book_ref.update({"status": "review_editor", "processedChunks": processed_count})
         logger.info(f"Pipeline complete: book={book_id}, chunks={processed_count}")

@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     CHROMA_PORT: int = 8001
 
     # LLM
-    LLM_MODEL: str = "gemini-2.5-flash"
+    LLM_MODEL: str = "gemini-2.0-flash-001"   # GA, available in all regions incl. europe-west1
     LLM_MAX_RETRIES: int = 3
     LLM_RETRY_MIN_WAIT: float = 2.0
     LLM_RETRY_MAX_WAIT: float = 10.0

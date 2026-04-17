@@ -43,6 +43,7 @@ interface BookMeta {
   title: string;
   authorId?: string;
   authorName?: string;
+  assignedEditorId?: string;
   assignedEditorName?: string;
   status: string;
   createdAt?: { toDate: () => Date };
@@ -352,7 +353,7 @@ function KPICard({ label, value, sub, icon: Icon, color, textColor }: {
 
 export default function ReportsPage() {
   const { role, organizationId } = useAuth();
-  const [activeTab, setActiveTab] = useState<"global" | "manuscrito">("manuscrito");
+  const [activeTab, setActiveTab] = useState<"global" | "editores" | "manuscrito">("global");
 
   // Org / global state
   const [kpis, setKpis] = useState<OrgKPIs | null>(null);
@@ -366,6 +367,9 @@ export default function ReportsPage() {
   const [selectedBookId, setSelectedBookId] = useState<string>("");
   const [msAnalytics, setMsAnalytics] = useState<ManuscriptAnalytics | null>(null);
   const [loadingMs, setLoadingMs] = useState(false);
+
+  // Per-editor state
+  const [selectedEditorId, setSelectedEditorId] = useState<string>("");
 
   const isSuperAdmin = role === "SuperAdmin";
   const isAdmin = role === "SuperAdmin" || role === "Responsable_Editorial";
@@ -484,8 +488,9 @@ export default function ReportsPage() {
       {/* ── Tabs ── */}
       <div style={{ display: "flex", gap: "0.25rem", marginBottom: "2rem", borderBottom: "1px solid var(--border-color)", paddingBottom: 0 }}>
         {([
-          { id: "manuscrito", label: "Por Manuscrito", icon: BookOpen },
-          { id: "global", label: "Vista Global", icon: BarChart3 },
+          { id: "global",      label: "Vista Global",     icon: BarChart3 },
+          { id: "editores",    label: "Editores",         icon: UserCheck },
+          { id: "manuscrito", label: "Por Manuscrito",   icon: BookOpen },
         ] as const).map(tab => (
           <button
             key={tab.id}
@@ -508,6 +513,226 @@ export default function ReportsPage() {
           </button>
         ))}
       </div>
+
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      {/* TAB: EDITORES                                                     */}
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      {activeTab === "editores" && (() => {
+        const editors = kpis?.editors ?? [];
+        const maxReviewed = Math.max(...editors.map(e => e.totalReviewed), 1);
+
+        // Books for the selected editor
+        const editorBooks = selectedEditorId
+          ? books.filter(b => b.assignedEditorId === selectedEditorId)
+          : [];
+
+        const selectedEditor = editors.find(e => e.editorId === selectedEditorId);
+
+        return (
+          <>
+            {/* ── 1. Productivity Overview ── */}
+            <div className="card-static" style={{ padding: 0, overflow: "hidden", marginBottom: "1.5rem" }}>
+              <div style={{ padding: "1rem 1.5rem", borderBottom: "1px solid var(--border-color)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h2 style={{ fontSize: "0.9375rem", fontWeight: 700, color: "var(--text-main)" }}>
+                  Productividad del equipo editorial
+                </h2>
+                <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>{editors.length} editor{editors.length !== 1 ? "es" : ""}</span>
+              </div>
+
+              {editors.length === 0 ? (
+                <div style={{ padding: "3rem", textAlign: "center", color: "var(--text-muted)", fontSize: "0.875rem" }}>
+                  Aún no hay correcciones revisadas. Una vez los editores acepten o rechacen sugerencias aparecerán aquí.
+                </div>
+              ) : (
+                <>
+                  {/* Editor bar chart */}
+                  <div style={{ padding: "1.25rem 1.5rem", borderBottom: "1px solid var(--border-color)" }}>
+                    <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.875rem" }}>
+                      Correcciones revisadas por editor
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                      {editors.map(e => {
+                        const accColor = e.acceptRate >= 75 ? "#10b981" : e.acceptRate >= 50 ? "#f59e0b" : "#ef4444";
+                        return (
+                          <div key={e.editorId}
+                            style={{ cursor: "pointer" }}
+                            onClick={() => setSelectedEditorId(e.editorId === selectedEditorId ? "" : e.editorId)}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.2rem" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                <div style={{
+                                  width: "6px", height: "6px", borderRadius: "50%",
+                                  backgroundColor: e.editorId === selectedEditorId ? "var(--primary)" : "var(--border-color)",
+                                  transition: "background 0.2s",
+                                }} />
+                                <span style={{ fontSize: "0.8125rem", fontWeight: e.editorId === selectedEditorId ? 700 : 500, color: "var(--text-main)" }}>
+                                  {e.editorName}
+                                </span>
+                                <span style={{ fontSize: "0.68rem", color: "var(--text-muted)" }}>{e.editorEmail}</span>
+                              </div>
+                              <div style={{ display: "flex", alignItems: "center", gap: "1.25rem", fontSize: "0.78rem" }}>
+                                <span style={{ color: "var(--text-muted)" }}>{e.totalReviewed} revisadas</span>
+                                <span style={{ color: "#10b981", fontWeight: 700 }}>{e.accepted} ✓</span>
+                                <span style={{ color: "#ef4444" }}>{e.rejected} ✗</span>
+                                <span style={{ fontWeight: 700, color: accColor, minWidth: "36px", textAlign: "right" }}>{e.acceptRate}%</span>
+                              </div>
+                            </div>
+                            <div style={{ display: "flex", gap: "2px", height: "8px", borderRadius: "4px", overflow: "hidden", backgroundColor: "var(--border-color)" }}>
+                              <div style={{
+                                width: `${Math.round((e.accepted / maxReviewed) * 100)}%`,
+                                backgroundColor: "#10b981",
+                                transition: "width 0.6s ease",
+                              }} />
+                              <div style={{
+                                width: `${Math.round((e.rejected / maxReviewed) * 100)}%`,
+                                backgroundColor: "rgba(239,68,68,0.6)",
+                                transition: "width 0.6s ease",
+                              }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: "flex", gap: "1.5rem", marginTop: "0.875rem", fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}><span style={{ width: "8px", height: "8px", borderRadius: "2px", backgroundColor: "#10b981", display: "inline-block" }} /> Aceptadas</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}><span style={{ width: "8px", height: "8px", borderRadius: "2px", backgroundColor: "rgba(239,68,68,0.6)", display: "inline-block" }} /> Rechazadas</span>
+                      <span style={{ color: "var(--primary)", marginLeft: "auto" }}>Haz clic en un editor para ver su detalle →</span>
+                    </div>
+                  </div>
+
+                  {/* Summary table */}
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8125rem" }}>
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid var(--border-color)" }}>
+                        {["Editor", "Revisadas", "Aceptadas", "Rechazadas", "Tasa", "Regla top"].map(h => (
+                          <th key={h} style={{ padding: "0.6rem 1.25rem", textAlign: h === "Editor" || h === "Regla top" ? "left" : "right", fontWeight: 600, color: "var(--text-muted)", fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {editors.map(e => (
+                        <tr
+                          key={e.editorId}
+                          style={{ borderBottom: "1px solid var(--border-color)", cursor: "pointer", backgroundColor: e.editorId === selectedEditorId ? "rgba(99,102,241,0.05)" : "transparent" }}
+                          onClick={() => setSelectedEditorId(e.editorId === selectedEditorId ? "" : e.editorId)}
+                        >
+                          <td style={{ padding: "0.7rem 1.25rem" }}>
+                            <div style={{ fontWeight: 600, color: "var(--text-main)" }}>{e.editorName}</div>
+                          </td>
+                          <td style={{ padding: "0.7rem 1.25rem", textAlign: "right", fontWeight: 600 }}>{e.totalReviewed}</td>
+                          <td style={{ padding: "0.7rem 1.25rem", textAlign: "right", color: "#10b981", fontWeight: 600 }}>{e.accepted}</td>
+                          <td style={{ padding: "0.7rem 1.25rem", textAlign: "right", color: "#ef4444", fontWeight: 600 }}>{e.rejected}</td>
+                          <td style={{ padding: "0.7rem 1.25rem" }}><AcceptBar rate={e.acceptRate} /></td>
+                          <td style={{ padding: "0.7rem 1.25rem" }}>
+                            <span style={{ padding: "0.15rem 0.5rem", backgroundColor: "var(--primary-light)", color: "var(--primary)", borderRadius: "99px", fontSize: "0.7rem", fontWeight: 600, maxWidth: "160px", display: "inline-block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {e.topRule.startsWith("RAE:") ? e.topRule.replace("RAE:", "") : e.topRule}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+            </div>
+
+            {/* ── 2. Per-editor drill-down ── */}
+            {selectedEditorId && selectedEditor && (
+              <div style={{ marginBottom: "1.5rem" }}>
+                {/* Editor header */}
+                <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1rem" }}>
+                  <div style={{ width: "44px", height: "44px", borderRadius: "50%", backgroundColor: "var(--primary-light)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <UserCheck size={20} style={{ color: "var(--primary)" }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "1.0625rem", fontWeight: 700, color: "var(--text-main)" }}>{selectedEditor.editorName}</div>
+                    <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>{selectedEditor.editorEmail}</div>
+                  </div>
+                  <button
+                    onClick={() => setSelectedEditorId("")}
+                    style={{ marginLeft: "auto", background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "0.8rem" }}
+                  >
+                    ✕ Cerrar detalle
+                  </button>
+                </div>
+
+                {/* Editor KPI strip */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.875rem", marginBottom: "1.25rem" }}>
+                  {[
+                    { label: "Revisadas", value: String(selectedEditor.totalReviewed), color: "#6366f1" },
+                    { label: "Aceptadas", value: String(selectedEditor.accepted), color: "#10b981" },
+                    { label: "Rechazadas", value: String(selectedEditor.rejected), color: "#ef4444" },
+                    { label: "Tasa aceptación", value: `${selectedEditor.acceptRate}%`, color: selectedEditor.acceptRate >= 75 ? "#10b981" : selectedEditor.acceptRate >= 50 ? "#f59e0b" : "#ef4444" },
+                  ].map(s => (
+                    <div key={s.label} className="card-static" style={{ padding: "0.875rem 1rem", textAlign: "center" }}>
+                      <div style={{ fontSize: "1.5rem", fontWeight: 700, color: s.color }}>{s.value}</div>
+                      <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", marginTop: "0.2rem" }}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Manuscripts assigned to this editor */}
+                <div className="card-static" style={{ overflow: "hidden" }}>
+                  <div style={{ padding: "1rem 1.5rem", borderBottom: "1px solid var(--border-color)" }}>
+                    <h3 style={{ fontSize: "0.875rem", fontWeight: 700, color: "var(--text-main)" }}>
+                      Manuscritos asignados — {editorBooks.length === 0 ? "ninguno" : `${editorBooks.length}`}
+                    </h3>
+                  </div>
+                  {editorBooks.length === 0 ? (
+                    <div style={{ padding: "2rem", textAlign: "center", color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                      No hay manuscritos asignados a este editor aún.
+                    </div>
+                  ) : (
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8125rem" }}>
+                      <thead>
+                        <tr style={{ borderBottom: "1px solid var(--border-color)" }}>
+                          {["Manuscrito", "Autor", "Estado", "Fecha"].map(h => (
+                            <th key={h} style={{ padding: "0.6rem 1.25rem", textAlign: "left", fontWeight: 600, color: "var(--text-muted)", fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {editorBooks.map(b => {
+                          const STATUS_LABELS: Record<string, { label: string; color: string }> = {
+                            draft: { label: "Borrador", color: "var(--text-muted)" },
+                            processing: { label: "Analizando", color: "#f59e0b" },
+                            review_editor: { label: "En revisión", color: "#6366f1" },
+                            review_author: { label: "Rev. autor", color: "#06b6d4" },
+                            approved: { label: "Aprobado", color: "#10b981" },
+                            error: { label: "Error", color: "#ef4444" },
+                          };
+                          const st = STATUS_LABELS[b.status] ?? { label: b.status, color: "var(--text-muted)" };
+                          return (
+                            <tr key={b.id} style={{ borderBottom: "1px solid var(--border-color)" }}>
+                              <td style={{ padding: "0.7rem 1.25rem", fontWeight: 600, color: "var(--text-main)" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                                  <FileText size={12} style={{ color: "var(--primary)", flexShrink: 0 }} />
+                                  {b.title}
+                                </div>
+                              </td>
+                              <td style={{ padding: "0.7rem 1.25rem", color: "var(--text-muted)", fontSize: "0.78rem" }}>
+                                {b.authorName ?? "—"}
+                              </td>
+                              <td style={{ padding: "0.7rem 1.25rem" }}>
+                                <span style={{ padding: "0.15rem 0.5rem", backgroundColor: `${st.color}22`, color: st.color, borderRadius: "99px", fontSize: "0.7rem", fontWeight: 700 }}>
+                                  {st.label}
+                                </span>
+                              </td>
+                              <td style={{ padding: "0.7rem 1.25rem", color: "var(--text-muted)", fontSize: "0.78rem" }}>
+                                {b.createdAt?.toDate?.()?.toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" }) ?? "—"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
+        );
+      })()}
 
       {/* ══════════════════════════════════════════════════════════════════ */}
       {/* TAB: POR MANUSCRITO                                               */}

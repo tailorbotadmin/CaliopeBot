@@ -245,59 +245,23 @@ export default function EditorPage() {
 
   if (!bookId) return <div style={{ padding: "2rem" }}>No se ha seleccionado ningún libro.</div>;
 
-  // Count processed chunks
+  // Derived state
   const processedChunks = chunks.filter(c => c.status === "processed").length;
   const isStillProcessing = bookStatus === "processing";
-  const hasReadyChunks = processedChunks > 0;
 
-  // Only block with the full spinner if no chunks are ready yet
-  if (isStillProcessing && !hasReadyChunks) {
-    const pct = totalChunks > 0 ? Math.round((processedCount / totalChunks) * 100) : 0;
-    return (
-      <div className="editor-container fade-in" style={{ alignItems: "center", justifyContent: "center" }}>
-        <div style={{ textAlign: "center", padding: "4rem 2rem", maxWidth: "480px" }}>
-          <div className="processing-spinner" style={{ marginBottom: "1.5rem" }}>
-            <div className="spinner-ring" />
-          </div>
-          <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--text-main)", marginBottom: "0.5rem" }}>
-            Los agentes están analizando el manuscrito
-          </h2>
-          <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", lineHeight: 1.6, marginBottom: "1.5rem" }}>
-            <strong style={{ color: "var(--primary)" }}>{bookTitle || "El manuscrito"}</strong> está siendo procesado.
-            La edición se desbloqueará en cuanto el primer segmento esté listo.
-          </p>
-          {totalChunks > 0 && (
-            <div style={{ marginBottom: "1rem" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.375rem" }}>
-                <span>Segmentos analizados</span>
-                <span>{processedCount} / {totalChunks}</span>
-              </div>
-              <div style={{ height: "6px", borderRadius: "99px", backgroundColor: "var(--border-color)", overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${pct}%`, backgroundColor: "var(--primary)", borderRadius: "99px", transition: "width 0.5s ease" }} />
-              </div>
-            </div>
-          )}
-          <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.375rem" }}>
-            <div className="pulse-dot" /> El análisis se actualiza en tiempo real...
-          </div>
-          <button
-            className="btn btn-secondary"
-            style={{ marginTop: "2rem" }}
-            onClick={() => router.push("/dashboard/books")}
-          >
-            <ArrowLeft size={14} style={{ marginRight: "0.375rem" }} /> Volver a la biblioteca
-          </button>
-        </div>
-      </div>
-    );
-  }
-
+  // Show a minimal loading state only if still ingesting (no chunks at all yet)
   if (chunks.length === 0) {
     return (
       <div className="editor-container" style={{ alignItems: "center", justifyContent: "center" }}>
         <div style={{ textAlign: "center", padding: "4rem", color: "var(--text-muted)" }}>
-          Este manuscrito no tiene segmentos de texto disponibles.
-          <br />
+          {isStillProcessing ? (
+            <>
+              <div className="processing-spinner" style={{ marginBottom: "1.5rem" }}><div className="spinner-ring" /></div>
+              <p>Preparando el manuscrito, por favor espera unos segundos…</p>
+            </>
+          ) : (
+            <p>Este manuscrito no tiene segmentos de texto disponibles.</p>
+          )}
           <button className="btn btn-secondary" style={{ marginTop: "1.5rem" }} onClick={() => router.push("/dashboard/books")}>
             Volver
           </button>
@@ -305,6 +269,7 @@ export default function EditorPage() {
       </div>
     );
   }
+
 
   const currentChunk = chunks[currentChunkIndex];
 
@@ -320,8 +285,8 @@ export default function EditorPage() {
 
   return (
     <div className="editor-container fade-in">
-      {/* ── Non-blocking analysis progress banner ───────────────────── */}
-      {isStillProcessing && hasReadyChunks && (
+      {/* ── Analysis progress banner — shows while processing, disappears when done — */}
+      {isStillProcessing && (
         <div style={{
           backgroundColor: "rgba(99,102,241,0.08)",
           borderBottom: "1px solid rgba(99,102,241,0.2)",
@@ -334,7 +299,9 @@ export default function EditorPage() {
         }}>
           <div className="pulse-dot" style={{ flexShrink: 0 }} />
           <span>
-            Analizando{totalChunks > 0 ? `: ${processedChunks} / ${totalChunks} segmentos listos` : "…"}
+            {totalChunks > 0
+              ? `Analizando: ${processedChunks} / ${totalChunks} segmentos listos`
+              : "Preparando análisis…"}
           </span>
           {totalChunks > 0 && (
             <div style={{ flex: 1, maxWidth: "200px", height: "4px", backgroundColor: "var(--border-color)", borderRadius: "2px", overflow: "hidden" }}>
@@ -342,7 +309,7 @@ export default function EditorPage() {
             </div>
           )}
           <span style={{ marginLeft: "auto", color: "#6366f1", fontWeight: 600 }}>
-            Los segmentos listos ya están disponibles para editar
+            Puedes editar mientras tanto
           </span>
         </div>
       )}
@@ -413,9 +380,19 @@ export default function EditorPage() {
       </header>
 
       {/* Editor Main Views */}
-      {currentChunk.status === "processing" ? (
-        <div style={{ textAlign: "center", padding: "4rem", color: "var(--text-muted)", flex: 1 }}>
-          Este fragmento aún está siendo procesado por IA...
+      {currentChunk.status === "pending" ? (
+        <div className="pane-wrapper">
+          <div className="text-pane">
+            <div className="pane-header">Texto Original (Autor)</div>
+            <div className="pane-content original-text">{currentChunk.text}</div>
+          </div>
+          <div className="text-pane" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "2rem" }}>
+              <div className="pulse-dot" style={{ margin: "0 auto 0.75rem" }} />
+              <p style={{ fontSize: "0.875rem" }}>Este segmento está en cola de análisis.</p>
+              <p style={{ fontSize: "0.75rem", marginTop: "0.25rem" }}>Las sugerencias aparecerán automáticamente cuando estén listas.</p>
+            </div>
+          </div>
         </div>
       ) : (
         <div className="pane-wrapper">

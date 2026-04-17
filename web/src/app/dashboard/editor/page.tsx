@@ -8,7 +8,7 @@ import { db } from "@/lib/firebase";
 import { updateBookStatus, notifyResponsables } from "@/lib/firestore";
 import { Document, Packer, Paragraph, TextRun } from "docx";
 import { saveAs } from "file-saver";
-import { ChevronLeft, ChevronRight, ArrowLeft, Download, CheckCircle2, XCircle, Clock } from "lucide-react";
+import { ChevronLeft, ChevronRight, ArrowLeft, Download, CheckCircle2, XCircle, Clock, Loader2 } from "lucide-react";
 import "./editor.css";
 
 type Suggestion = {
@@ -41,6 +41,9 @@ export default function EditorPage() {
   const [bookTitle, setBookTitle] = useState<string>("");
   const [processedCount, setProcessedCount] = useState(0);
   const [totalChunks, setTotalChunks] = useState(0);
+  const [chunkLoadError, setChunkLoadError] = useState<string | null>(null);
+  const [loadingTimedOut, setLoadingTimedOut] = useState(false);
+  const [retryingFromEditor, setRetryingFromEditor] = useState(false);
 
   const [selectedSuggestion, setSelectedSuggestion] = useState<string | null>(null);
   const [editingSuggestion, setEditingSuggestion] = useState<string | null>(null);
@@ -99,11 +102,50 @@ export default function EditorPage() {
     const unsub = onSnapshot(q, (snap) => {
       const fetched = snap.docs.map(d => ({ id: d.id, ...d.data() } as Chunk));
       setChunks(fetched);
+      setChunkLoadError(null);
     }, (err) => {
       console.error("Error listening to chunks:", err);
+      setChunkLoadError(`Error al cargar segmentos: ${err.message}`);
     });
     return unsub;
   }, [organizationId, bookId]);
+
+  // ── Timeout detection: if chunks still empty after 30s → show retry ──
+  useEffect(() => {
+    if (chunks.length > 0) { setLoadingTimedOut(false); return; }
+    if (bookStatus !== "processing") return;
+    const t = setTimeout(() => setLoadingTimedOut(true), 30_000);
+    return () => clearTimeout(t);
+  }, [chunks.length, bookStatus]);
+
+  // ── Retry from editor (calls /retry-book) ────────────────────────────
+  const handleEditorRetry = async () => {
+    if (!organizationId || !bookId || !user) return;
+    setRetryingFromEditor(true);
+    try {
+      const token = await user.getIdToken();
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+      const res = await fetch(`${apiUrl}/api/v1/retry-book`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ organizationId, bookId, authorId: user.uid }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setLoadingTimedOut(false);
+        // status will update via live listener
+      } else if (data?.detail?.startsWith("no_chunks:")) {
+        // No chunks in DB — need full re-ingestion via the books page
+        alert("El manuscrito no tiene segmentos registrados. Vuelve a la lista y usa el botón de re-ingesta (↺).");
+      } else {
+        alert(`Error al reintentar: ${data?.detail ?? res.statusText}`);
+      }
+    } catch (e) {
+      alert("No se pudo conectar con el servidor de análisis.");
+    } finally {
+      setRetryingFromEditor(false);
+    }
+  };
 
 
   const handleNextPhase = async () => {
@@ -251,20 +293,58 @@ export default function EditorPage() {
 
   // Show a minimal loading state only if still ingesting (no chunks at all yet)
   if (chunks.length === 0) {
+    const isBlocked = loadingTimedOut || chunkLoadError;
     return (
       <div className="editor-container" style={{ alignItems: "center", justifyContent: "center" }}>
-        <div style={{ textAlign: "center", padding: "4rem", color: "var(--text-muted)" }}>
-          {isStillProcessing ? (
+        <div style={{ textAlign: "center", padding: "4rem 2rem", color: "var(--text-muted)", maxWidth: "480px" }}>
+          {chunkLoadError ? (
+            <>
+              <div style={{ fontSize: "2rem", marginBottom: "1rem" }}>⚠️</div>
+              <p style={{ color: "#ef4444", fontWeight: 600, marginBottom: "0.5rem" }}>Error de permisos o conexión</p>
+              <p style={{ fontSize: "0.8rem", marginBottom: "1.5rem" }}>{chunkLoadError}</p>
+            </>
+          ) : isStillProcessing && !isBlocked ? (
             <>
               <div className="processing-spinner" style={{ marginBottom: "1.5rem" }}><div className="spinner-ring" /></div>
-              <p>Preparando el manuscrito, por favor espera unos segundos…</p>
+              <p style={{ marginBottom: "0.5rem" }}>Preparando el manuscrito, por favor espera…</p>
+              <p style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>El análisis puede tardar varios minutos para manuscritos largos.</p>
+            </>
+          ) : isStillProcessing && isBlocked ? (
+            <>
+              <div style={{ fontSize: "2.5rem", marginBottom: "1rem" }}>🔄</div>
+              <p style={{ fontWeight: 700, color: "var(--text-main)", marginBottom: "0.5rem" }}>El análisis parece bloqueado</p>
+              <p style={{ fontSize: "0.8rem", marginBottom: "1.5rem" }}>
+                Lleva más de 30 segundos sin cargar segmentos. El worker puede haber caído o el análisis tardó demasiado.
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                <button
+                  className="btn"
+                  onClick={handleEditorRetry}
+                  disabled={retryingFromEditor}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem" }}
+                >
+                  {retryingFromEditor ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : "↺"}
+                  Reintentar análisis (sin re-subir el archivo)
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => router.push("/dashboard/books")}
+                >
+                  Volver a Manuscritos
+                </button>
+              </div>
+              <p style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: "1.25rem" }}>
+                Si el reintento no funciona, vuelve a la lista y usa el botón ↺ de re-ingesta completa.
+              </p>
             </>
           ) : (
             <p>Este manuscrito no tiene segmentos de texto disponibles.</p>
           )}
-          <button className="btn btn-secondary" style={{ marginTop: "1.5rem" }} onClick={() => router.push("/dashboard/books")}>
-            Volver
-          </button>
+          {!isBlocked && !chunkLoadError && (
+            <button className="btn btn-secondary" style={{ marginTop: "1.5rem" }} onClick={() => router.push("/dashboard/books")}>
+              Volver
+            </button>
+          )}
         </div>
       </div>
     );

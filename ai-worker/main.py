@@ -462,8 +462,8 @@ async def retry_book(request: RetryBookRequest, background_tasks: BackgroundTask
         except Exception:
             raise HTTPException(status_code=401, detail="Invalid token")
 
-    org_id  = request.organizationId
-    book_id = request.bookId
+    org_id    = request.organizationId
+    book_id   = request.bookId
     author_id = request.authorId
 
     book_ref = (
@@ -475,31 +475,62 @@ async def retry_book(request: RetryBookRequest, background_tasks: BackgroundTask
         raise HTTPException(status_code=404, detail="Book not found")
 
     chunks_ref = book_ref.collection("chunks")
-
-    # Reset any stuck chunks back to pending
     all_chunks = list(chunks_ref.stream())
-    pending_count = sum(1 for c in all_chunks if c.to_dict().get("status") == "pending")
     total = len(all_chunks)
 
-    if pending_count == 0:
-        raise HTTPException(status_code=400, detail="No pending chunks — book may already be processed")
+    # ── Case 1: No chunks at all ─ ingestion never completed ─────────────
+    if total == 0:
+        raise HTTPException(
+            status_code=409,
+            detail="no_chunks:El manuscrito no tiene segmentos. Usa 'Reintentar' desde la lista de manuscritos para volver a subirlo."
+        )
 
-    # Mark book as processing and clear old voiceProfile so it's regenerated
+    # ── Case 2: All chunks already processed ─ just advance the status ───
+    processed_count = sum(1 for c in all_chunks if c.to_dict().get("status") == "processed")
+    pending_count   = sum(1 for c in all_chunks if c.to_dict().get("status") == "pending")
+
+    if pending_count == 0 and processed_count == total:
+        # Pipeline already finished — update status so the editor can open
+        logger.info(f"Retry: book={book_id} already processed, advancing to review_editor")
+        book_ref.update({"status": "review_editor", "processedChunks": total})
+        return {
+            "status": "already_done",
+            "bookId": book_id,
+            "message": "Todos los segmentos ya estaban procesados. Estado actualizado a revisión.",
+            "totalChunks": total,
+            "pendingChunks": 0,
+        }
+
+    # ── Case 3: Some chunks pending / stuck ─ reset all and re-run ────────
+    # Reset every chunk to pending so the pipeline re-runs from scratch
+    # (handles partial failures where only some chunks got suggestions)
+    batch_size = 450
+    chunks_to_reset = [
+        c for c in all_chunks
+        if c.to_dict().get("status") != "pending"
+    ]
+    for i in range(0, len(chunks_to_reset), batch_size):
+        batch = db.batch()
+        for c in chunks_to_reset[i:i + batch_size]:
+            batch.update(chunks_ref.document(c.id), {"status": "pending", "suggestions": []})
+        batch.commit()
+
+    # Reset book state and clear voiceProfile so it's regenerated
     book_ref.update({
         "status": "processing",
-        "processedChunks": total - pending_count,
+        "processedChunks": 0,
         "totalChunks": total,
-        "voiceProfile": None,   # force re-extraction with new V2 analyzer
+        "voiceProfile": None,
     })
 
     background_tasks.add_task(process_book_background, org_id, book_id, author_id)
-    logger.info(f"Retry triggered: book={book_id}, pending={pending_count}/{total}")
+    logger.info(f"Retry triggered: book={book_id}, total={total} chunks reset to pending")
 
     return {
         "status": "retrying",
         "bookId": book_id,
         "totalChunks": total,
-        "pendingChunks": pending_count,
+        "pendingChunks": total,
     }
 
 

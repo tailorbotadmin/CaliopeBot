@@ -8,6 +8,7 @@ on:
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: europe-west1
+  LLM_LOCATION: us-central1   # gemini-2.0-flash-001 GA only available here
   AR_REPO: caliopebot
   AI_WORKER_SERVICE: caliopebot-ai-worker
   WEB_SERVICE: caliopebot-web
@@ -52,7 +53,7 @@ jobs:
             --min-instances 1 \
             --max-instances 10 \
             --timeout 300 \
-            --set-env-vars "ENVIRONMENT=production,GCP_PROJECT_ID=${{ env.PROJECT_ID }},GCP_LOCATION=${{ env.REGION }}" \
+            --set-env-vars "ENVIRONMENT=production,GCP_PROJECT_ID=${{ env.PROJECT_ID }},GCP_LOCATION=${{ env.LLM_LOCATION }}" \
             --allow-unauthenticated
 
       - name: Make ai-worker publicly accessible (IAM)

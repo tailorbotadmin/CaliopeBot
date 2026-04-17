@@ -616,14 +616,14 @@ export default function BooksPage() {
 
                 {/* Editor asignado column — dropdown for admins, label for others */}
                 <div style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
-                  {isAdmin && orgEditors.length > 0 ? (
+                  {isAdmin ? (
                     <>
                       <UserCheck size={12} style={{ color: "var(--primary)", flexShrink: 0 }} />
                       <select
                         value={book.assignedEditorId ?? ""}
                         onChange={e => handleAssignEditor(book, e.target.value)}
-                        disabled={assigningId === book.id}
-                        title="Asignar editor"
+                        disabled={assigningId === book.id || orgEditors.length === 0}
+                        title={orgEditors.length === 0 ? "No hay editores en la organización" : "Asignar editor"}
                         style={{
                           fontSize: "0.78rem",
                           padding: "0.2rem 0.3rem",
@@ -631,12 +631,12 @@ export default function BooksPage() {
                           border: "1px solid var(--border-color)",
                           backgroundColor: book.assignedEditorId ? "rgba(99,102,241,0.08)" : "var(--card-bg)",
                           color: book.assignedEditorId ? "#6366f1" : "var(--text-muted)",
-                          cursor: "pointer",
+                          cursor: orgEditors.length === 0 ? "not-allowed" : "pointer",
                           width: "100%",
                           maxWidth: "155px",
                         }}
                       >
-                        <option value="">Sin asignar</option>
+                        <option value="">{orgEditors.length === 0 ? "Sin editores" : "Sin asignar"}</option>
                         {orgEditors.map(e => (
                           <option key={e.uid} value={e.uid}>{e.displayName ?? e.email}</option>
                         ))}
@@ -700,6 +700,21 @@ export default function BooksPage() {
                     </button>
                   )}
 
+                  {/* Retry analysis — for review_editor with 0 suggestions (analysis failed silently) */}
+                  {book.status === "review_editor" && (
+                    <button
+                      title="Reanálisis IA (el análisis anterior falló)"
+                      className="btn btn-secondary"
+                      style={{ padding: "0.3rem 0.5rem", fontSize: "0.75rem", display: "flex", alignItems: "center", gap: "0.25rem", color: "#f59e0b", borderColor: "rgba(245,158,11,0.4)" }}
+                      onClick={() => handleRetryAnalysis(book)}
+                      disabled={retryingId === book.id}
+                    >
+                      {retryingId === book.id
+                        ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
+                        : <RefreshCw size={13} />}
+                    </button>
+                  )}
+
                   {/* Open editor */}
                   {book.status !== "error" && book.status !== "draft" && (
                     <Link
@@ -712,10 +727,10 @@ export default function BooksPage() {
                     </Link>
                   )}
 
-                  {/* Download edited docx (approved) */}
-                  {book.status === "approved" && (
+                  {/* Download edited docx — available from review_editor onwards */}
+                  {["review_editor", "review_author", "review_responsable", "approved"].includes(book.status) && (
                     <button
-                      title="Descargar editado"
+                      title="Descargar manuscrito editado (.docx)"
                       className="btn"
                       style={{ padding: "0.3rem 0.5rem", fontSize: "0.75rem", backgroundColor: "var(--success)", display: "flex", alignItems: "center" }}
                       onClick={() => handleDownloadEditedDocx(book)}

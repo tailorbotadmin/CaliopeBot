@@ -360,61 +360,60 @@ async def process_book_background(org_id: str, book_id: str, author_id: str):
                     for m in lt_matches
                 ]
 
-            # ── CorrectorAgent ────────────────────────────────────────────────
-            corrections = corrector.run(text, org_id, author_id, voice_profile)
+                # ── CorrectorAgent ────────────────────────────────────────────
+                corrections = corrector.run(text, org_id, author_id, voice_profile)
 
-            # Add LanguageTool errors as additional corrections
-            for error in lt_errors:
-                if error["replacements"]:
-                    corrections.append({
-                        "id": f"lt_{uuid.uuid4().hex[:8]}",
-                        "originalText": error["context"],
-                        "correctedText": error["replacements"][0],
-                        "justification": f"LanguageTool — Regla {error['rule']}: {error['message']}",
-                        "reglaAplicada": error["rule"],
-                        "riskLevel": "low",
-                    })
+                # Add LanguageTool errors as additional corrections
+                for error in lt_errors:
+                    if error["replacements"]:
+                        corrections.append({
+                            "id": f"lt_{uuid.uuid4().hex[:8]}",
+                            "originalText": error["context"],
+                            "correctedText": error["replacements"][0],
+                            "justification": f"LanguageTool — Regla {error['rule']}: {error['message']}",
+                            "reglaAplicada": error["rule"],
+                            "riskLevel": "low",
+                        })
 
-            for c in corrections:
-                c.setdefault("status", "pending")
-
-            final_suggestions = []
-
-            if corrections:
-                # ── RevisorAgent ──────────────────────────────────────────────
-                reviews = revisor.run(text, corrections, org_id, author_id, voice_profile)
-                review_map = {r["correctionId"]: r for r in reviews}
-
-                approved, contested = [], []
                 for c in corrections:
-                    rev = review_map.get(c["id"])
-                    if not rev:
-                        # No review — include as-is
-                        approved.append(c)
-                        continue
-                    decision = rev.get("decision", "aprobada")
-                    if decision == "aprobada":
-                        approved.append(c)
-                    elif decision == "modificada":
-                        c["correctedText"] = rev.get("correctedTextFinal") or c["correctedText"]
-                        c["justification"] += f" [Revisor: {rev.get('razon', '')}]"
-                        approved.append(c)
-                    else:  # rechazada
-                        contested.append(c)
+                    c.setdefault("status", "pending")
 
-                # ── ArbiterAgent (only if there are contested corrections) ─────
-                if contested:
-                    logger.info(f"[book={book_id} chunk={chunk.id}] Arbiter resolving {len(contested)} contested")
-                    arbiter_suggestions = arbiter.run(
-                        text, contested, reviews, org_id, author_id, voice_profile
-                    )
-                    # Arbiter results override: add only what the Arbiter approves
-                    for s in arbiter_suggestions:
-                        s.setdefault("status", "pending")
-                    final_suggestions = approved + arbiter_suggestions
-                else:
-                    final_suggestions = approved
-            # If no corrections from either agent, final_suggestions stays []
+                final_suggestions = []
+
+                if corrections:
+                    # ── RevisorAgent ──────────────────────────────────────────
+                    reviews = revisor.run(text, corrections, org_id, author_id, voice_profile)
+                    review_map = {r["correctionId"]: r for r in reviews}
+
+                    approved, contested = [], []
+                    for c in corrections:
+                        rev = review_map.get(c["id"])
+                        if not rev:
+                            # No review — include as-is
+                            approved.append(c)
+                            continue
+                        decision = rev.get("decision", "aprobada")
+                        if decision == "aprobada":
+                            approved.append(c)
+                        elif decision == "modificada":
+                            c["correctedText"] = rev.get("correctedTextFinal") or c["correctedText"]
+                            c["justification"] += f" [Revisor: {rev.get('razon', '')}]"
+                            approved.append(c)
+                        else:  # rechazada
+                            contested.append(c)
+
+                    # ── ArbiterAgent (only if there are contested corrections) ─
+                    if contested:
+                        logger.info(f"[book={book_id} chunk={chunk.id}] Arbiter resolving {len(contested)} contested")
+                        arbiter_suggestions = arbiter.run(
+                            text, contested, reviews, org_id, author_id, voice_profile
+                        )
+                        for s in arbiter_suggestions:
+                            s.setdefault("status", "pending")
+                        final_suggestions = approved + arbiter_suggestions
+                    else:
+                        final_suggestions = approved
+                # If no corrections from either agent, final_suggestions stays []
 
                 # ── Commit this chunk immediately (progressive loading) ────────
                 chunks_ref.document(chunk.id).update({

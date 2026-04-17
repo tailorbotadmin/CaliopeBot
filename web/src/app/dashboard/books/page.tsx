@@ -430,7 +430,16 @@ export default function BooksPage() {
         },
         async () => {
           const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-          createdBookId = await createBook(selectedOrgId, effectiveAuthorId, newTitle.trim(), downloadURL, selectedFile!.name);
+          createdBookId = await createBook(
+            selectedOrgId,
+            effectiveAuthorId,
+            newTitle.trim(),
+            downloadURL,
+            selectedFile!.name,
+            // store author display name for easy display in the list
+            orgAuthors.find(a => a.uid === effectiveAuthorId)?.displayName
+              ?? (effectiveAuthorId === user!.uid ? (user!.displayName ?? user!.email ?? "") : "")
+          );
           const ok = await triggerIngestion(createdBookId, selectedOrgId, downloadURL, effectiveAuthorId);
           if (ok) {
             await updateBookStatus(selectedOrgId, createdBookId, "processing");
@@ -540,7 +549,7 @@ export default function BooksPage() {
           {/* List header */}
           <div style={{
             display: "grid",
-            gridTemplateColumns: "1fr 140px 120px 160px",
+            gridTemplateColumns: "2fr 130px 180px 120px 95px 130px",
             padding: "0.625rem 1.25rem",
             borderBottom: "1px solid var(--border-color)",
             fontSize: "0.7rem",
@@ -550,6 +559,8 @@ export default function BooksPage() {
             color: "var(--text-muted)",
           }}>
             <span>Manuscrito</span>
+            <span>Autor</span>
+            <span>Editor asignado</span>
             <span>Estado</span>
             <span>Fecha</span>
             <span style={{ textAlign: "right" }}>Acciones</span>
@@ -566,7 +577,7 @@ export default function BooksPage() {
                 key={book.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1fr 140px 120px 160px",
+                  gridTemplateColumns: "2fr 130px 180px 120px 95px 130px",
                   padding: "0.875rem 1.25rem",
                   alignItems: "center",
                   borderBottom: isLast ? "none" : "1px solid var(--border-color)",
@@ -590,6 +601,51 @@ export default function BooksPage() {
                     <p style={{ fontSize: "0.68rem", color: "#ef4444", marginTop: "0.25rem", paddingLeft: "1.4rem" }}>
                       Error en la edición — usa Reintentar
                     </p>
+                  )}
+                </div>
+
+                {/* Autor column */}
+                <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "0.3rem", overflow: "hidden" }}>
+                  <UserCircle2 size={12} style={{ flexShrink: 0 }} />
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {book.authorName
+                      ?? orgAuthors.find(a => a.uid === book.authorId)?.displayName
+                      ?? (book.authorId === user?.uid ? (user?.displayName ?? "Yo") : book.authorId.slice(0, 8))}
+                  </span>
+                </div>
+
+                {/* Editor asignado column — dropdown for admins, label for others */}
+                <div style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+                  {isAdmin && orgEditors.length > 0 ? (
+                    <>
+                      <UserCheck size={12} style={{ color: "var(--primary)", flexShrink: 0 }} />
+                      <select
+                        value={book.assignedEditorId ?? ""}
+                        onChange={e => handleAssignEditor(book, e.target.value)}
+                        disabled={assigningId === book.id}
+                        title="Asignar editor"
+                        style={{
+                          fontSize: "0.78rem",
+                          padding: "0.2rem 0.3rem",
+                          borderRadius: "var(--radius)",
+                          border: "1px solid var(--border-color)",
+                          backgroundColor: book.assignedEditorId ? "rgba(99,102,241,0.08)" : "var(--card-bg)",
+                          color: book.assignedEditorId ? "#6366f1" : "var(--text-muted)",
+                          cursor: "pointer",
+                          width: "100%",
+                          maxWidth: "155px",
+                        }}
+                      >
+                        <option value="">Sin asignar</option>
+                        {orgEditors.map(e => (
+                          <option key={e.uid} value={e.uid}>{e.displayName ?? e.email}</option>
+                        ))}
+                      </select>
+                    </>
+                  ) : (
+                    <span style={{ fontSize: "0.78rem", color: book.assignedEditorName ? "#6366f1" : "var(--text-muted)" }}>
+                      {book.assignedEditorName ?? "—"}
+                    </span>
                   )}
                 </div>
 
@@ -684,34 +740,6 @@ export default function BooksPage() {
                         ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
                         : <Unlock size={13} />}
                     </button>
-                  )}
-
-                  {/* Assign corrector — Responsable_Editorial / SuperAdmin only */}
-                  {isAdmin && orgEditors.length > 0 && (
-                    <div style={{ position: "relative", display: "flex", alignItems: "center", gap: "0.25rem" }}>
-                      <UserCheck size={13} style={{ color: "var(--primary)", flexShrink: 0 }} />
-                      <select
-                        value={book.assignedEditorId ?? ""}
-                        onChange={e => handleAssignEditor(book, e.target.value)}
-                        disabled={assigningId === book.id}
-                        title="Asignar corrector"
-                        style={{
-                          fontSize: "0.72rem",
-                          padding: "0.2rem 0.3rem",
-                          borderRadius: "var(--radius)",
-                          border: "1px solid var(--border-color)",
-                          backgroundColor: "var(--card-bg)",
-                          color: "var(--text-main)",
-                          cursor: "pointer",
-                          maxWidth: "110px",
-                        }}
-                      >
-                        <option value="">Sin corrector</option>
-                        {orgEditors.map(e => (
-                          <option key={e.uid} value={e.uid}>{e.displayName ?? e.email}</option>
-                        ))}
-                      </select>
-                    </div>
                   )}
 
                   {/* Delete — triggers confirmation modal */}

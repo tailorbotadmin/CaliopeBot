@@ -43,6 +43,7 @@ export interface Book {
   id: string;
   title: string;
   authorId: string;
+  authorName?: string;
   organizationId: string;
   status: 'draft' | 'processing' | 'review_editor' | 'review_author' | 'review_responsable' | 'approved' | 'error';
   fileUrl?: string;
@@ -215,10 +216,11 @@ export async function getOrganizations(): Promise<Organization[]> {
 // BOOKS
 // ==========================================
 
-export async function createBook(orgId: string, authorId: string, title: string, fileUrl?: string, fileName?: string): Promise<string> {
+export async function createBook(orgId: string, authorId: string, title: string, fileUrl?: string, fileName?: string, authorName?: string): Promise<string> {
   const bookRef = await addDoc(collection(db, 'organizations', orgId, 'books'), {
     title,
     authorId,
+    authorName: authorName || null,
     organizationId: orgId,
     // Always start as 'draft'. The AI worker sets 'processing' once it
     // confirms it received the ingestion request successfully.

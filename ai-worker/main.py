@@ -86,11 +86,12 @@ except Exception as e:
 # ==========================================
 # AI AGENTS
 # ==========================================
-from app.services.agents import GeneratorAgent, CriticAgent, ArbiterAgent
+from app.services.agents import VoiceAnalyzerAgent, CorrectorAgent, RevisorAgent, ArbiterAgent
 
-generator = GeneratorAgent(client=client, model=settings.LLM_MODEL)
-critic = CriticAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL)
-arbiter = ArbiterAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL)
+voice_analyzer = VoiceAnalyzerAgent(client=client, model=settings.LLM_MODEL)
+corrector = CorrectorAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL)
+revisor   = RevisorAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL)
+arbiter   = ArbiterAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL)
 
 # ==========================================
 # METRICS
@@ -211,10 +212,10 @@ def health_check():
 
 @app.post("/api/v1/process-text", response_model=CorrectionResponse)
 async def process_text(request: CorrectionRequest):
-    """Main correction endpoint: multi-agent debate pipeline."""
+    """Main correction endpoint: Corrector → Revisor → Arbiter pipeline."""
     logger.info(f"Processing text {request.textId} for org={request.tenantId}")
 
-    # 1. LanguageTool (deterministic)
+    # LanguageTool (deterministic RAE)
     lt_matches = tool.check(request.text)
     lt_errors = [
         {
@@ -226,42 +227,76 @@ async def process_text(request: CorrectionRequest):
         for m in lt_matches
     ]
 
-    # 2. Generator Agent
-    gpt2_text = generator.run(request.text)
+    # No book-level voice profile available in single-text calls
+    _empty_voice = {
+        "resumen": "",
+        "rasgos_clave": [],
+        "instrucciones_agentes": "Sé conservador y respeta la voz del autor.",
+        "ejemplos_representativos": [],
+    }
 
-    # 3. Critic Agent (with RAG)
-    critique = critic.run(request.text, gpt2_text, request.tenantId, request.authorId)
+    # Corrector → Revisor → conditional Arbiter
+    corrections = corrector.run(request.text, request.tenantId, request.authorId, _empty_voice)
 
-    # 4. Arbiter Agent (with RAG)
-    final_suggestions_raw = arbiter.run(
-        request.text, gpt2_text, critique,
-        request.tenantId, request.authorId, lt_errors,
-    )
-
-    # Parse to SuggestionResponse
-    final_suggestions = [SuggestionResponse(**s) for s in final_suggestions_raw]
-
-    # Add LanguageTool suggestions (etiquetadas como RAE)
     for error in lt_errors:
         if error["replacements"]:
-            final_suggestions.append(SuggestionResponse(
-                id=f"lt_{uuid.uuid4().hex[:8]}",
-                originalText=error["context"],
-                correctedText=error["replacements"][0],
-                justification=f"[RAE / LanguageTool] {error['message']} (Regla: {error['rule']})",
-                riskLevel="low",
-                sourceRule=f"RAE:{error['rule']}",
-            ))
+            corrections.append({
+                "id": f"lt_{uuid.uuid4().hex[:8]}",
+                "originalText": error["context"],
+                "correctedText": error["replacements"][0],
+                "justification": f"[RAE / LanguageTool] {error['message']} (Regla: {error['rule']})",
+                "reglaAplicada": error["rule"],
+                "riskLevel": "low",
+            })
+
+    reviews = revisor.run(request.text, corrections, request.tenantId, request.authorId, _empty_voice)
+    review_map = {r["correctionId"]: r for r in reviews}
+
+    approved, contested = [], []
+    for c in corrections:
+        rev = review_map.get(c.get("id", ""))
+        decision = rev.get("decision", "aprobada") if rev else "aprobada"
+        if decision == "aprobada":
+            approved.append(c)
+        elif decision == "modificada":
+            c["correctedText"] = rev.get("correctedTextFinal") or c["correctedText"]
+            approved.append(c)
+        else:
+            contested.append(c)
+
+    arbiter_resolved = []
+    if contested:
+        arbiter_resolved = arbiter.run(request.text, contested, reviews, request.tenantId, request.authorId, _empty_voice)
+
+    final_raw = approved + arbiter_resolved
+    final_suggestions = []
+    for s in final_raw:
+        try:
+            s.setdefault("id", f"s_{uuid.uuid4().hex[:8]}")
+            s.setdefault("sourceRule", s.get("reglaAplicada", "AI"))
+            final_suggestions.append(SuggestionResponse(**{
+                k: s[k] for k in ("id", "originalText", "correctedText", "justification", "riskLevel", "sourceRule")
+                if k in s
+            }))
+        except Exception:
+            pass
 
     CORRECTIONS_PROCESSED.inc()
     return CorrectionResponse(textId=str(uuid.uuid4()), suggestions=final_suggestions)
 
 
 async def process_book_background(org_id: str, book_id: str, author_id: str):
-    """Background task: process book chunks through multi-agent pipeline."""
+    """
+    Multi-agent editorial pipeline:
+      [0] VoiceAnalyzer  — one-time author style extraction
+      [1] CorrectorAgent — specific rule-grounded corrections
+      [2] RevisorAgent   — validates every correction
+      [3] ArbiterAgent   — resolves disagreements (conditional)
+      [+] LanguageTool   — deterministic RAE checks
+    """
     ACTIVE_JOBS.inc()
     try:
-        logger.info(f"Background processing started: book={book_id}")
+        logger.info(f"Pipeline started: book={book_id}")
         chunks_ref = (
             db.collection("organizations").document(org_id)
             .collection("books").document(book_id).collection("chunks")
@@ -271,12 +306,29 @@ async def process_book_background(org_id: str, book_id: str, author_id: str):
             .collection("books").document(book_id)
         )
 
-        # Fetch ALL pending chunks (no limit — process the whole manuscript)
+        # ── Step 0: Voice Profile (extract once, reuse for all chunks) ─────────
+        book_data = book_ref.get().to_dict() or {}
+        voice_profile = book_data.get("voiceProfile")
+
+        if not voice_profile:
+            logger.info(f"Extracting voice profile for book={book_id}")
+            sample_docs = list(chunks_ref.order_by("order").limit(20).stream())
+            sample_paragraphs = [
+                d.to_dict().get("text", "") for d in sample_docs
+                if d.to_dict().get("text", "").strip()
+            ]
+            voice_profile = voice_analyzer.run(sample_paragraphs)
+            book_ref.update({"voiceProfile": voice_profile})
+            logger.info(f"Voice profile stored for book={book_id}: {voice_profile.get('rasgos_clave', [])}")
+        else:
+            logger.info(f"Reusing existing voice profile for book={book_id}")
+
+        # ── Step 1: Collect pending chunks ────────────────────────────────────
         all_chunks = list(chunks_ref.order_by("order").stream())
         pending = [c for c in all_chunks if c.to_dict().get("status") == "pending"]
 
         if not pending:
-            logger.warning(f"No pending chunks found for book={book_id}. Already processed or empty.")
+            logger.warning(f"No pending chunks for book={book_id}")
             book_ref.update({"status": "review_editor", "processedChunks": 0})
             return
 
@@ -286,50 +338,88 @@ async def process_book_background(org_id: str, book_id: str, author_id: str):
             data = chunk.to_dict()
             text = data["text"]
 
-            # 1. LanguageTool
-            lt_matches = tool.check(text)
+            # ── LanguageTool (deterministic RAE) ──────────────────────────────
+            try:
+                lt_matches = tool.check(text)
+            except Exception:
+                lt_matches = []
             lt_errors = [
-                {"rule": m.ruleId, "message": m.message,
-                 "replacements": m.replacements[:3],
-                 "context": text[m.offset:m.offset + m.errorLength]}
+                {
+                    "rule": m.ruleId,
+                    "message": m.message,
+                    "replacements": m.replacements[:3],
+                    "context": text[m.offset:m.offset + m.errorLength],
+                }
                 for m in lt_matches
             ]
 
-            # 2-4. Agent pipeline
-            gpt2_text = generator.run(text)
-            critique = critic.run(text, gpt2_text, org_id, author_id)
-            suggestions = arbiter.run(text, gpt2_text, critique, org_id, author_id, lt_errors)
+            # ── CorrectorAgent ────────────────────────────────────────────────
+            corrections = corrector.run(text, org_id, author_id, voice_profile)
 
-            # Add LT suggestions
+            # Add LanguageTool errors as additional corrections
             for error in lt_errors:
                 if error["replacements"]:
-                    suggestions.append({
+                    corrections.append({
                         "id": f"lt_{uuid.uuid4().hex[:8]}",
                         "originalText": error["context"],
                         "correctedText": error["replacements"][0],
-                        "justification": f"Regla {error['rule']}: {error['message']}",
+                        "justification": f"LanguageTool — Regla {error['rule']}: {error['message']}",
+                        "reglaAplicada": error["rule"],
                         "riskLevel": "low",
-                        "status": "pending",
-                        "sourceRule": error["rule"],
                     })
 
-            for s in suggestions:
-                s.setdefault("status", "pending")
+            for c in corrections:
+                c.setdefault("status", "pending")
 
-            # ── Commit THIS chunk immediately so the editor unlocks progressively ──
+            final_suggestions = []
+
+            if corrections:
+                # ── RevisorAgent ──────────────────────────────────────────────
+                reviews = revisor.run(text, corrections, org_id, author_id, voice_profile)
+                review_map = {r["correctionId"]: r for r in reviews}
+
+                approved, contested = [], []
+                for c in corrections:
+                    rev = review_map.get(c["id"])
+                    if not rev:
+                        # No review — include as-is
+                        approved.append(c)
+                        continue
+                    decision = rev.get("decision", "aprobada")
+                    if decision == "aprobada":
+                        approved.append(c)
+                    elif decision == "modificada":
+                        c["correctedText"] = rev.get("correctedTextFinal") or c["correctedText"]
+                        c["justification"] += f" [Revisor: {rev.get('razon', '')}]"
+                        approved.append(c)
+                    else:  # rechazada
+                        contested.append(c)
+
+                # ── ArbiterAgent (only if there are contested corrections) ─────
+                if contested:
+                    logger.info(f"[book={book_id} chunk={chunk.id}] Arbiter resolving {len(contested)} contested")
+                    arbiter_suggestions = arbiter.run(
+                        text, contested, reviews, org_id, author_id, voice_profile
+                    )
+                    # Arbiter results override: add only what the Arbiter approves
+                    for s in arbiter_suggestions:
+                        s.setdefault("status", "pending")
+                    final_suggestions = approved + arbiter_suggestions
+                else:
+                    final_suggestions = approved
+            # If no corrections from either agent, final_suggestions stays []
+
+            # ── Commit this chunk immediately (progressive loading) ────────────
             chunks_ref.document(chunk.id).update({
                 "status": "processed",
-                "suggestions": suggestions,
+                "suggestions": final_suggestions,
             })
             processed_count += 1
-
-            # Update progress counter on the book doc after each chunk
             book_ref.update({"processedChunks": processed_count})
-            logger.info(f"book={book_id}: chunk {processed_count}/{len(pending)} done")
+            logger.info(f"book={book_id}: chunk {processed_count}/{len(pending)} done ({len(final_suggestions)} suggestions)")
 
-        # Mark book as ready for editor review
         book_ref.update({"status": "review_editor", "processedChunks": processed_count})
-        logger.info(f"Background done: book={book_id}, processed={processed_count}")
+        logger.info(f"Pipeline complete: book={book_id}, chunks={processed_count}")
 
 
     except Exception as e:

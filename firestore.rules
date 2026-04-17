@@ -115,6 +115,24 @@ service cloud.firestore {
     }
 
     // ==========================================
+    // CORRECTIONS (editorial analytics feed)
+    // Written by editors when accepting/rejecting suggestions.
+    // ==========================================
+    match /corrections/{correctionId} {
+      // Any authenticated user of the same org can create a correction record
+      allow create: if isAuthenticated() && (
+        isSuperAdmin() ||
+        hasRole(['Admin', 'Responsable_Editorial', 'Editor', 'Autor', 'Traductor'])
+      );
+      // Read is org-scoped (for reports dashboards)
+      allow read: if isSuperAdmin() || (
+        isAuthenticated() &&
+        resource.data.organizationId == request.auth.token.organizationId
+      );
+      // No update/delete — records are immutable audit logs
+    }
+
+    // ==========================================
     // DENY ALL OTHER ACCESS
     // ==========================================
     match /{document=**} {

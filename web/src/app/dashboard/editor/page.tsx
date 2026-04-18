@@ -37,6 +37,7 @@ export default function EditorPage() {
 
   const [chunks, setChunks] = useState<Chunk[]>([]);
   const [currentChunkIndex, setCurrentChunkIndex] = useState(0);
+  const [resolvedOrgId, setResolvedOrgId] = useState<string | null>(null); // resolved for SuperAdmin
   const [bookStatus, setBookStatus] = useState<string>("processing");
   const [bookTitle, setBookTitle] = useState<string>("");
   const [processedCount, setProcessedCount] = useState(0);
@@ -75,10 +76,36 @@ export default function EditorPage() {
     return { total, resolved, pct: total > 0 ? Math.round((resolved / total) * 100) : 0 };
   }, [chunks]);
 
+  // ── Resolve orgId for SuperAdmin (no organizationId in token) ────────
+  useEffect(() => {
+    if (!bookId) return;
+    if (organizationId) { setResolvedOrgId(organizationId); return; }
+    // SuperAdmin: search all orgs to find which contains this bookId
+    (async () => {
+      try {
+        const { getDocs, collection: col, doc: docRef, getDoc } = await import("firebase/firestore");
+        const orgsSnap = await getDocs(col(db, "organizations"));
+        for (const orgDoc of orgsSnap.docs) {
+          const bookSnap = await getDoc(docRef(db, "organizations", orgDoc.id, "books", bookId));
+          if (bookSnap.exists()) {
+            setResolvedOrgId(orgDoc.id);
+            return;
+          }
+        }
+        setChunkLoadError("No se encontró el libro en ninguna organización.");
+      } catch (e) {
+        setChunkLoadError("Error buscando el libro: " + (e instanceof Error ? e.message : String(e)));
+      }
+    })();
+  }, [bookId, organizationId]);
+
+  // Effective orgId to use for all Firestore queries
+  const effectiveOrgId = resolvedOrgId;
+
   // ── Real-time book listener ───────────────────────────────────────
   useEffect(() => {
-    if (!organizationId || !bookId) return;
-    const bookRef = doc(db, "organizations", organizationId, "books", bookId);
+    if (!effectiveOrgId || !bookId) return;
+    const bookRef = doc(db, "organizations", effectiveOrgId, "books", bookId);
     const unsub = onSnapshot(bookRef, (snap) => {
       if (snap.exists()) {
         const data = snap.data();
@@ -89,14 +116,13 @@ export default function EditorPage() {
       }
     });
     return unsub;
-  }, [organizationId, bookId]);
+  }, [effectiveOrgId, bookId]);
 
   // ── Real-time chunks listener ─────────────────────────────────────
-  // Updates chunk list live as the worker commits each batch.
   useEffect(() => {
-    if (!organizationId || !bookId) return;
+    if (!effectiveOrgId || !bookId) return;
     const q = query(
-      collection(db, "organizations", organizationId, "books", bookId, "chunks"),
+      collection(db, "organizations", effectiveOrgId, "books", bookId, "chunks"),
       orderBy("order", "asc")
     );
     const unsub = onSnapshot(q, (snap) => {
@@ -108,7 +134,8 @@ export default function EditorPage() {
       setChunkLoadError(`Error al cargar segmentos: ${err.message}`);
     });
     return unsub;
-  }, [organizationId, bookId]);
+  }, [effectiveOrgId, bookId]);
+
 
   // ── Timeout detection: if chunks still empty after 30s → show retry ──
   useEffect(() => {
@@ -120,7 +147,7 @@ export default function EditorPage() {
 
   // ── Retry from editor (calls /retry-book) ────────────────────────────
   const handleEditorRetry = async () => {
-    if (!organizationId || !bookId || !user) return;
+    if (!effectiveOrgId || !bookId || !user) return;
     setRetryingFromEditor(true);
     try {
       const token = await user.getIdToken();
@@ -128,14 +155,12 @@ export default function EditorPage() {
       const res = await fetch(`${apiUrl}/api/v1/retry-book`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ organizationId, bookId, authorId: user.uid }),
+        body: JSON.stringify({ organizationId: effectiveOrgId, bookId, authorId: user.uid }),
       });
       const data = await res.json();
       if (res.ok) {
         setLoadingTimedOut(false);
-        // status will update via live listener
       } else if (data?.detail?.startsWith("no_chunks:")) {
-        // No chunks in DB — need full re-ingestion via the books page
         alert("El manuscrito no tiene segmentos registrados. Vuelve a la lista y usa el botón de re-ingesta (↺).");
       } else {
         alert(`Error al reintentar: ${data?.detail ?? res.statusText}`);
@@ -149,28 +174,27 @@ export default function EditorPage() {
 
 
   const handleNextPhase = async () => {
-    if (!bookId || !organizationId) return;
+    if (!bookId || !effectiveOrgId) return;
     let nextStatus = "review_author";
     if (role === "Editor") nextStatus = "review_author";
     else if (role === "Autor") nextStatus = "review_responsable";
     else if (role === "Responsable_Editorial" || role === "SuperAdmin") nextStatus = "approved";
 
     try {
-      await updateBookStatus(organizationId, bookId, nextStatus);
-      // Notify Responsables if Editor or Autor finishes their phase
-      if ((role === "Editor" || role === "Autor") && organizationId) {
+      await updateBookStatus(effectiveOrgId, bookId, nextStatus);
+      if ((role === "Editor" || role === "Autor") && effectiveOrgId) {
         try {
           const bookTitleEl = document.querySelector("h1");
-          const bookTitle = bookTitleEl?.textContent ?? bookId ?? "";
-          await notifyResponsables(organizationId, {
+          const bookTitleText = bookTitleEl?.textContent ?? bookId ?? "";
+          await notifyResponsables(effectiveOrgId, {
             type: "correction_done",
             title: role === "Editor" ? "Corrección completada" : "Revisión de autor completada",
             message: role === "Editor"
               ? `El editor ha completado las correcciones del manuscrito y está listo para revisión del autor.`
               : `El autor ha revisado el manuscrito y está listo para aprobación final.`,
             bookId: bookId ?? "",
-            bookTitle: bookTitle,
-            organizationId: organizationId,
+            bookTitle: bookTitleText,
+            organizationId: effectiveOrgId,
             read: false,
           });
         } catch { /* non-critical */ }
@@ -256,11 +280,11 @@ export default function EditorPage() {
   };
 
   const saveChunkLocally = async (newSuggestions: Suggestion[]) => {
-    if (!organizationId || !bookId || chunks.length === 0) return;
+    if (!effectiveOrgId || !bookId || chunks.length === 0) return;
     const currentChunk = chunks[currentChunkIndex];
     try {
       await setDoc(
-        doc(db, "organizations", organizationId, "books", bookId, "chunks", currentChunk.id),
+        doc(db, "organizations", effectiveOrgId, "books", bookId, "chunks", currentChunk.id),
         { ...currentChunk, suggestions: newSuggestions },
         { merge: true }
       );

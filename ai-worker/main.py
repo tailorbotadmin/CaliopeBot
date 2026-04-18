@@ -502,33 +502,13 @@ async def retry_book(request: RetryBookRequest, background_tasks: BackgroundTask
             detail="no_chunks:El manuscrito no tiene segmentos. Usa 'Reintentar' desde la lista de manuscritos para volver a subirlo."
         )
 
-    # ── Case 2: All chunks already processed ─ just advance the status ───
-    processed_count = sum(1 for c in all_chunks if c.to_dict().get("status") == "processed")
-    pending_count   = sum(1 for c in all_chunks if c.to_dict().get("status") == "pending")
-
-    if pending_count == 0 and processed_count == total:
-        # Pipeline already finished — update status so the editor can open
-        logger.info(f"Retry: book={book_id} already processed, advancing to review_editor")
-        book_ref.update({"status": "review_editor", "processedChunks": total})
-        return {
-            "status": "already_done",
-            "bookId": book_id,
-            "message": "Todos los segmentos ya estaban procesados. Estado actualizado a revisión.",
-            "totalChunks": total,
-            "pendingChunks": 0,
-        }
-
-    # ── Case 3: Some chunks pending / stuck ─ reset all and re-run ────────
-    # Reset every chunk to pending so the pipeline re-runs from scratch
-    # (handles partial failures where only some chunks got suggestions)
+    # ── Reset ALL chunks to pending and re-run (always) ──────────────────
+    # We never short-circuit — even if chunks are "processed", they may have
+    # empty suggestions (silent failure). Always re-run when retry is forced.
     batch_size = 450
-    chunks_to_reset = [
-        c for c in all_chunks
-        if c.to_dict().get("status") != "pending"
-    ]
-    for i in range(0, len(chunks_to_reset), batch_size):
+    for i in range(0, len(all_chunks), batch_size):
         batch = db.batch()
-        for c in chunks_to_reset[i:i + batch_size]:
+        for c in all_chunks[i:i + batch_size]:
             batch.update(chunks_ref.document(c.id), {"status": "pending", "suggestions": []})
         batch.commit()
 

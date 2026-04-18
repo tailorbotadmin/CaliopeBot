@@ -323,34 +323,39 @@ class RevisorAgent(BaseAgent):
             if self.vector_store else ""
         )
         voice_instructions = voice_profile.get("instrucciones_agentes", "")
+        has_voice = bool(voice_instructions)
 
         corrections_json = json.dumps(corrections, ensure_ascii=False, indent=2)
 
-        prompt = f"""Eres el Revisor Editorial. Evalúa críticamente cada corrección propuesta por el Corrector.
+        if has_voice:
+            voice_block = f"VOZ DEL AUTOR: {voice_instructions}"
+            decision_guide = (
+                '"aprobada" si es correcta y respeta la voz del autor;'
+                ' "modificada" si la idea vale pero el texto debe cambiar;'
+                ' "rechazada" si es innecesaria o viola la voz del autor.'
+                ' Sé independiente y protege la voz.'
+            )
+        else:
+            voice_block = (
+                "MODO RAE ESTRICTO: no hay perfil de estilo. "
+                "Aprueba correcciones de tilde, ortografia, concordancia, puntuacion y extranjerismos. "
+                "Rechaza solo si la correccion es claramente incorrecta segun la RAE."
+            )
+            decision_guide = (
+                '"aprobada" si la correccion es tecnicamente correcta segun la RAE (usa esto el 90% del tiempo);'
+                ' "modificada" si hay una forma mas precisa;'
+                ' "rechazada" SOLO si la correccion es claramente erronea segun la RAE.'
+            )
+        prompt = (
+            f"Eres el Revisor Editorial.\n\n"
+            f"{voice_block}\n\n"
+            f"TEXTO ORIGINAL:\n{text}\n\n"
+            f"CORRECCIONES A REVISAR:\n{corrections_json}\n\n"
+            f"REGLAS EDITORIALES:\n{rag_context}\n\n"
+            f"MISION: Para cada correccion (usa su campo 'id' como correctionId), decide: {decision_guide}\n"
+            f"Devuelve SOLO el array JSON con una entrada por correccion."
+        )
 
-════ VOZ DEL AUTOR ════
-⚠️ {voice_instructions}
-
-════ TEXTO ORIGINAL ════
-{text}
-
-════ CORRECCIONES A REVISAR ════
-{corrections_json}
-
-════ REGLAS EDITORIALES ════
-{rag_context}
-
-════ TU MISIÓN ════
-Para cada corrección (usa su campo "id" como correctionId), decide:
-
-• "aprobada"  — la corrección es correcta, necesaria y respeta la voz del autor
-• "modificada" — la idea es válida pero el texto corregido debería ser diferente;
-                 proporciona correctedTextFinal con tu versión alternativa
-• "rechazada" — la corrección es innecesaria, incorrecta o viola la voz del autor
-
-Sé independiente: no apruebes automáticamente. Tu deber es proteger la calidad y la voz del autor.
-
-Devuelve SOLO el array JSON con una entrada por cada corrección recibida."""
 
         try:
             result = self._call_llm(prompt, json_schema=self.SCHEMA, temperature=0.2)

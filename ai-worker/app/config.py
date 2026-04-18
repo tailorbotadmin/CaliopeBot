@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     # GCP / Vertex AI
     GCP_PROJECT_ID: str = "caliopebot-dad29"
-    GCP_LOCATION: str = "us-central1"
+    GCP_LOCATION: str = "europe-west1"
     FIREBASE_SERVICE_ACCOUNT_PATH: str = ""
 
     # API

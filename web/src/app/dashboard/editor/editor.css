@@ -347,3 +347,37 @@
   0%, 100% { opacity: 1; transform: scale(1); }
   50%       { opacity: 0.4; transform: scale(0.8); }
 }
+
+/* ============================================ */
+/*  SIDEBAR TOGGLE                              */
+/* ============================================ */
+
+.sidebar {
+  transition: width 0.2s ease, padding 0.2s ease, min-width 0.2s ease;
+}
+
+.btn-ghost {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-ghost:hover {
+  background-color: var(--border-color);
+}
+
+/* ============================================ */
+/*  CHUNK BADGE STRIP (bottom nav)              */
+/* ============================================ */
+
+.chunk-badge {
+  transition: border-color 0.15s, background-color 0.15s, transform 0.1s;
+}
+.chunk-badge:hover {
+  border-color: var(--primary) !important;
+  transform: scale(1.08);
+}
+.chunk-badge.active {
+  box-shadow: 0 0 0 2px rgba(99,102,241,0.25);
+}

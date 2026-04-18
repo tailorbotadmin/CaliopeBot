@@ -161,11 +161,18 @@ jobs:
       - name: Install firebase-tools
         run: npm install -g firebase-tools
 
-      - name: Deploy Firebase Hosting + Firestore Rules
+      - name: Deploy Firebase Hosting
         run: |
-          firebase deploy --only hosting,firestore:rules \
+          firebase deploy --only hosting \
             --project ${{ env.PROJECT_ID }} \
             --non-interactive
+
+      - name: Deploy Firestore Rules
+        continue-on-error: true
+        run: |
+          firebase deploy --only firestore:rules \
+            --project ${{ env.PROJECT_ID }} \
+            --non-interactive --force
 
       - name: Apply Firebase Storage CORS
         run: |

@@ -182,8 +182,9 @@ class CorrectorAgent(BaseAgent):
                 "justification": {"type": "STRING"},
                 "reglaAplicada": {"type": "STRING"},
                 "riskLevel":     {"type": "STRING"},  # "low" | "medium" | "high"
+                "category":      {"type": "STRING"},  # Tildes | Gramática | Puntuación | Extranjerismos | Ortografía | Léxico | Tipografía
             },
-            "required": ["originalText", "correctedText", "justification", "riskLevel"],
+            "required": ["originalText", "correctedText", "justification", "riskLevel", "category"],
         },
     }
 
@@ -243,6 +244,7 @@ Para cada fragmento:
 - justification: explica qué regla viola y por qué tu corrección es mejor
 - reglaAplicada: nombre o número de la regla editorial aplicada (si la conoces)
 - riskLevel: "low" si es error claro, "medium" si puede ser opinable, "high" si puede ser elección del autor
+- category: una de estas categorías exactas → Tildes | Gramática | Puntuación | Extranjerismos | Ortografía | Léxico | Tipografía
 
 PROHIBIDO:
 ✗ Reescribir el texto completo
@@ -259,6 +261,7 @@ Devuelve SOLO el array JSON."""
                 c["id"] = f"corrector_{uuid.uuid4().hex[:8]}"
                 c.setdefault("reglaAplicada", "")
                 c.setdefault("riskLevel", "medium")
+                c.setdefault("category", "Ortografía")
             logger.info(f"[corrector] {len(corrections)} corrections proposed")
             return corrections
         except Exception as e:

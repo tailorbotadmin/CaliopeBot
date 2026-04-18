@@ -34,8 +34,8 @@ class Settings(BaseSettings):
     CHROMA_HOST: str = "localhost"
     CHROMA_PORT: int = 8001
 
-    # LLM — gemini-2.0-flash: mejor equilibrio calidad/velocidad para corrección editorial (GA, disponible en todas las regiones)
-    LLM_MODEL: str = "gemini-2.0-flash"
+    # LLM — gemini-2.0-flash-001: modelo GA estable disponible en us-central1
+    LLM_MODEL: str = "gemini-2.0-flash-001"
     LLM_MAX_RETRIES: int = 3
     LLM_RETRY_MIN_WAIT: float = 2.0
     LLM_RETRY_MAX_WAIT: float = 10.0

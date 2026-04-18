@@ -59,18 +59,37 @@ except ValueError:
 db = firestore.client()
 
 # ==========================================
-# VERTEX AI CLIENT (ADC via service account — no API key needed)
+# GEMINI CLIENT  
+# Priority: VERTEX_API_KEY → GEMINI_API_KEY → Vertex ADC
 # ==========================================
 try:
-    logger.info("Initializing Gemini Client via Vertex AI (ADC)")
-    client = genai.Client(
-        vertexai=True,
-        project=settings.GCP_PROJECT_ID,
-        location=settings.GCP_LOCATION,
-    )
+    _vertex_key = settings.VERTEX_API_KEY or settings.GEMINI_API_KEY
+    if _vertex_key and _vertex_key.startswith("AQ."):
+        # Vertex AI API key — uses aiplatform.googleapis.com
+        from google.genai import types as _gtypes
+        logger.info(f"Initializing Gemini via Vertex AI API key (model: {settings.LLM_MODEL})")
+        client = genai.Client(
+            api_key=_vertex_key,
+            http_options={"api_version": "v1"},
+        )
+        # Override the base URL to aiplatform
+        client._api_client._http_options.base_url = "https://aiplatform.googleapis.com/"
+    elif _vertex_key:
+        # AI Studio key (generativelanguage.googleapis.com)
+        logger.info(f"Initializing Gemini via AI Studio API key (model: {settings.LLM_MODEL})")
+        client = genai.Client(api_key=_vertex_key)
+    else:
+        # Fallback: Vertex AI ADC
+        logger.info("No API key — falling back to Vertex AI ADC")
+        client = genai.Client(
+            vertexai=True,
+            project=settings.GCP_PROJECT_ID,
+            location=settings.GCP_LOCATION,
+        )
 except Exception as e:
-    logger.warning(f"Vertex AI GenAI init failed, using mocks: {e}")
+    logger.warning(f"Gemini client init failed: {e}")
     client = None
+
 
 # ==========================================
 # VECTOR STORE (ChromaDB)
@@ -89,10 +108,11 @@ except Exception as e:
 # ==========================================
 from app.services.agents import VoiceAnalyzerAgent, CorrectorAgent, RevisorAgent, ArbiterAgent
 
-voice_analyzer = VoiceAnalyzerAgent(client=client, model=settings.LLM_MODEL)
-corrector = CorrectorAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL)
-revisor   = RevisorAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL)
-arbiter   = ArbiterAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL)
+_vertex_key = settings.VERTEX_API_KEY or settings.GEMINI_API_KEY
+voice_analyzer = VoiceAnalyzerAgent(client=client, model=settings.LLM_MODEL, vertex_api_key=_vertex_key)
+corrector = CorrectorAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL, vertex_api_key=_vertex_key)
+revisor   = RevisorAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL, vertex_api_key=_vertex_key)
+arbiter   = ArbiterAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL, vertex_api_key=_vertex_key)
 
 # ==========================================
 # METRICS

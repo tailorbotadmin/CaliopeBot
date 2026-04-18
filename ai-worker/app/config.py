@@ -34,8 +34,10 @@ class Settings(BaseSettings):
     CHROMA_HOST: str = "localhost"
     CHROMA_PORT: int = 8001
 
-    # LLM — gemini-2.0-flash-001: modelo GA estable disponible en us-central1
-    LLM_MODEL: str = "gemini-2.0-flash-001"
+    # LLM — Vertex AI API key (aiplatform.googleapis.com) — gemini-2.5-flash-lite confirmado
+    GEMINI_API_KEY: str = ""   # AI Studio key (fallback)
+    VERTEX_API_KEY: str = ""   # Vertex AI API key (preferido)
+    LLM_MODEL: str = "gemini-2.5-flash-lite"
     LLM_MAX_RETRIES: int = 3
     LLM_RETRY_MIN_WAIT: float = 2.0
     LLM_RETRY_MAX_WAIT: float = 10.0

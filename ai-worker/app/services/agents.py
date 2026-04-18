@@ -25,42 +25,71 @@ from app.services.metrics import (
 logger = logging.getLogger(__name__)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Base Agent
-# ─────────────────────────────────────────────────────────────────────────────
+import urllib.request as _urllib_request
 
 class BaseAgent:
     """Base class with LLM call, retry and metrics."""
 
-    def __init__(self, client, model: str = "gemini-2.0-flash-001", name: str = "base"):
+    VERTEX_API_BASE = "https://aiplatform.googleapis.com/v1/publishers/google/models"
+
+    def __init__(self, client, model: str = "gemini-2.0-flash", name: str = "base",
+                 vertex_api_key: str = ""):
         self.client = client
         self.model = model
         self.name = name
+        self.vertex_api_key = vertex_api_key  # "AQ.xxx" → Vertex AI REST API
 
-    LLM_CALL_TIMEOUT: int = 90     # seconds per individual LLM request
-    LLM_MAX_RETRIES:  int = 3       # retries per agent call
-    LLM_RETRY_WAIT:   float = 3.0   # base wait between retries
+    LLM_CALL_TIMEOUT: int = 90
+    LLM_MAX_RETRIES:  int = 3
+    LLM_RETRY_WAIT:   float = 3.0
+
+    def _call_llm_vertex_http(self, prompt: str, json_schema=None, temperature: float = 0.2) -> str:
+        """Call Vertex AI REST API directly with API key (no SDK needed)."""
+        import json as _json
+        url = f"{self.VERTEX_API_BASE}/{self.model}:generateContent?key={self.vertex_api_key}"
+        generation_config = {"temperature": temperature, "maxOutputTokens": 8192}
+        if json_schema:
+            generation_config["responseMimeType"] = "application/json"
+            generation_config["responseSchema"] = json_schema
+        payload = _json.dumps({
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": generation_config,
+        }).encode("utf-8")
+        req = _urllib_request.Request(
+            url, data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with _urllib_request.urlopen(req, timeout=self.LLM_CALL_TIMEOUT) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        return text.strip()
 
     def _call_llm(self, prompt: str, json_schema=None, temperature: float = 0.2) -> str:
         """Call the LLM with timeout and retry. Raises on all-retries exhausted."""
-        if not self.client:
+        use_http = bool(self.vertex_api_key and self.vertex_api_key.startswith("AQ."))
+        if not use_http and not self.client:
             return self._mock_response(prompt)
 
         def _do_call():
             LLM_CALLS.labels(agent=self.name, model=self.model).inc()
             start = time.time()
-            config = types.GenerateContentConfig(
-                response_mime_type="application/json" if json_schema else "text/plain",
-                **({"response_schema": json_schema} if json_schema else {}),
-                temperature=temperature,
-            )
-            response = self.client.models.generate_content(
-                model=self.model, contents=prompt, config=config
-            )
+            if use_http:
+                result = self._call_llm_vertex_http(prompt, json_schema, temperature)
+            else:
+                config = types.GenerateContentConfig(
+                    response_mime_type="application/json" if json_schema else "text/plain",
+                    **(({"response_schema": json_schema}) if json_schema else {}),
+                    temperature=temperature,
+                )
+                response = self.client.models.generate_content(
+                    model=self.model, contents=prompt, config=config
+                )
+                result = response.text.strip()
             duration = time.time() - start
             LLM_LATENCY.labels(agent=self.name, model=self.model).observe(duration)
             logger.info(f"[{self.name}] LLM call: {duration:.2f}s")
-            return response.text.strip()
+            return result
 
         last_err = None
         for attempt in range(1, self.LLM_MAX_RETRIES + 1):

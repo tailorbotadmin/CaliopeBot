@@ -197,20 +197,37 @@ class CorrectorAgent(BaseAgent):
             if self.vector_store else "No hay reglas editoriales registradas."
         )
         voice_summary      = voice_profile.get("resumen", "")
-        voice_instructions = voice_profile.get("instrucciones_agentes", "Sé conservador.")
+        voice_instructions = voice_profile.get("instrucciones_agentes", "")
         voice_examples     = voice_profile.get("ejemplos_representativos", [])
+
+        has_voice = bool(voice_summary or voice_instructions or voice_examples)
 
         examples_block = ""
         if voice_examples:
             examples_block = "Ejemplos de su estilo:\n" + "\n".join(f'• "{e}"' for e in voice_examples)
 
-        prompt = f"""Eres el Corrector Editorial de una editorial profesional española.
-
-════ VOZ DEL AUTOR — PRIORITARIA ════
+        if has_voice:
+            voice_block = f"""════ VOZ DEL AUTOR — PRIORITARIA ════
 {voice_summary}
 {examples_block}
 
-⚠️ INSTRUCCIÓN CRÍTICA: {voice_instructions}
+⚠️ INSTRUCCIÓN CRÍTICA: {voice_instructions}"""
+        else:
+            voice_block = """════ MODO CORRECCIÓN ORTOTIPOGRÁFICA ════
+No se ha detectado perfil de estilo del autor. Aplica corrección técnica exhaustiva:
+• Ortografía y tildes (RAE)
+• Puntuación: comas, punto y coma, dos puntos, comillas españolas «», guiones
+• Concordancia de género y número
+• Uso correcto de mayúsculas
+• Errores de tipografía: espacios dobles, espacios antes de puntuación
+• Anglicismos evitables con equivalente español
+• Verbosidad y redundancias evidentes
+• Gerundios incorrectos
+Sé exhaustivo: un informe académico o técnico tiene errores ortotipográficos reales."""
+
+        prompt = f"""Eres el Corrector Editorial de una editorial profesional española.
+
+{voice_block}
 
 ════ REGLAS EDITORIALES (RAG) ════
 {rag_context}
@@ -230,7 +247,6 @@ Para cada fragmento:
 PROHIBIDO:
 ✗ Reescribir el texto completo
 ✗ Cambiar frases que no tienen error objetivo
-✗ Modificar el estilo o voz del autor sin violación de regla
 ✗ Proponer originalText que no aparezca literalmente en el texto
 
 Si no hay correcciones necesarias, devuelve [].

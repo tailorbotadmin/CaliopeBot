@@ -440,7 +440,7 @@ export default function BooksPage() {
             downloadURL,
             selectedFile!.name,
             // store author display name for easy display in the list
-            orgAuthors.find(a => a.uid === effectiveAuthorId)?.displayName
+            [...orgAuthors, ...orgEditors].find(u => u.uid === effectiveAuthorId)?.displayName
               ?? (effectiveAuthorId === user!.uid ? (user!.displayName ?? user!.email ?? "") : "")
           );
           const ok = await triggerIngestion(createdBookId, selectedOrgId, downloadURL, effectiveAuthorId);
@@ -614,8 +614,8 @@ export default function BooksPage() {
                   <UserCircle2 size={12} style={{ flexShrink: 0 }} />
                   <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {book.authorName
-                      ?? orgAuthors.find(a => a.uid === book.authorId)?.displayName
-                      ?? (book.authorId === user?.uid ? (user?.displayName ?? "Yo") : book.authorId.slice(0, 8))}
+                      ?? [...orgAuthors, ...orgEditors].find(u => u.uid === book.authorId)?.displayName
+                      ?? (book.authorId === user?.uid ? (user?.displayName ?? user?.email ?? "Yo") : "Autor")}
                   </span>
                 </div>
 

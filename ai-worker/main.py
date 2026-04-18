@@ -119,6 +119,56 @@ except Exception as e:
     tool = MockTool()
 
 # ==========================================
+# RAG BOOTSTRAP — load editorial criteria
+# from Firestore into ChromaDB on startup
+# ==========================================
+def _bootstrap_rag_from_firestore():
+    """Load all active editorial_criteria from Firestore into ChromaDB.
+    
+    Called once at startup so the RAG is always populated regardless of
+    whether the ChromaDB persist dir survived the container restart.
+    """
+    if vector_store is None:
+        logger.warning("[RAG bootstrap] vector_store not available, skipping")
+        return
+    try:
+        orgs = db.collection("organizations").get()
+        total_loaded = 0
+        for org_doc in orgs:
+            org_id = org_doc.id
+            criteria_ref = (
+                db.collection("organizations")
+                .document(org_id)
+                .collection("editorial_criteria")
+            )
+            criteria = criteria_ref.where("status", "==", "active").get()
+            for c in criteria:
+                data = c.to_dict()
+                rule_text = data.get("description", "")
+                rule_name = data.get("name", "")
+                source    = data.get("source", "")
+                if not rule_text:
+                    continue
+                full_text = rule_text
+                if rule_name:
+                    full_text = f"{rule_name}: {rule_text}"
+                if source:
+                    full_text += f" (Fuente: {source})"
+                vector_store.add_editorial_rule(
+                    org_id=org_id,
+                    rule_id=f"firestore_{c.id}",
+                    rule_text=full_text,
+                    metadata={"category": data.get("category", ""), "source": source},
+                )
+                total_loaded += 1
+        logger.info(f"[RAG bootstrap] Loaded {total_loaded} editorial rules from Firestore")
+    except Exception as e:
+        logger.error(f"[RAG bootstrap] Failed: {e}", exc_info=True)
+
+_bootstrap_rag_from_firestore()
+
+
+# ==========================================
 # FASTAPI APP
 # ==========================================
 app = FastAPI(
@@ -364,16 +414,27 @@ async def process_book_background(org_id: str, book_id: str, author_id: str):
                 corrections = corrector.run(text, org_id, author_id, voice_profile)
 
                 # Add LanguageTool errors as additional corrections
+                def _lt_category(rule_id: str) -> str:
+                    r = rule_id.upper()
+                    if any(k in r for k in ["ACENTO", "TILDE", "DIACRIT"]): return "Tildes"
+                    if any(k in r for k in ["PUNTUACION", "PUNCT", "COMA", "PUNTO"]): return "Puntuación"
+                    if any(k in r for k in ["GRAM", "CONCORD", "VERB", "PREP", "DEQUE"]): return "Gramática"
+                    if any(k in r for k in ["TYPO", "ESPACIO", "MAYUSC"]): return "Tipografía"
+                    if any(k in r for k in ["FOREIGN", "EXTRAN", "ANGLICI"]): return "Extranjerismos"
+                    return "Ortografía"
+
                 for error in lt_errors:
                     if error["replacements"]:
                         corrections.append({
                             "id": f"lt_{uuid.uuid4().hex[:8]}",
                             "originalText": error["context"],
                             "correctedText": error["replacements"][0],
-                            "justification": f"LanguageTool — Regla {error['rule']}: {error['message']}",
+                            "justification": f"LanguageTool RAE — {error['message']} (Regla: {error['rule']})",
                             "reglaAplicada": error["rule"],
                             "riskLevel": "low",
+                            "category": _lt_category(error["rule"]),
                         })
+
 
                 for c in corrections:
                     c.setdefault("status", "pending")

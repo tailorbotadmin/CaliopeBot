@@ -22,6 +22,12 @@
   border-radius: var(--radius);
   cursor: pointer;
   transition: background 0.15s;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
 }
 .btn-ghost:hover {
   background-color: var(--border-color);
@@ -362,6 +368,12 @@
   border-radius: var(--radius);
   cursor: pointer;
   transition: background 0.15s;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
 }
 .btn-ghost:hover {
   background-color: var(--border-color);

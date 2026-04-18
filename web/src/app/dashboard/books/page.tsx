@@ -552,7 +552,7 @@ export default function BooksPage() {
           {/* List header */}
           <div style={{
             display: "grid",
-            gridTemplateColumns: "1fr 100px 150px 105px 80px 145px",
+            gridTemplateColumns: "200px 100px 150px 105px 80px 145px",
             gap: "0 0.5rem",
             padding: "0.625rem 1.25rem",
             borderBottom: "1px solid var(--border-color)",
@@ -581,7 +581,7 @@ export default function BooksPage() {
                 key={book.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1fr 100px 150px 105px 80px 145px",
+                  gridTemplateColumns: "200px 100px 150px 105px 80px 145px",
                   gap: "0 0.5rem",
                   padding: "0.875rem 1.25rem",
                   alignItems: "center",

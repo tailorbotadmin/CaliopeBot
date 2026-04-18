@@ -328,26 +328,39 @@ export default function EditorPage() {
 
           <span style={{ color: "var(--border-color)" }}>/</span>
 
+          {/* Analysis progress bar */}
+          {totalChunks > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginLeft: "0.75rem", flexShrink: 0 }}>
+              <div style={{ width: "120px", height: "4px", backgroundColor: "var(--border-color)", borderRadius: "2px", overflow: "hidden" }} title="Análisis IA">
+                <div style={{ height: "100%", width: `${Math.round((processedCount / totalChunks) * 100)}%`, backgroundColor: processedCount === totalChunks ? "var(--success)" : "#6366f1", transition: "width 0.4s ease", borderRadius: "2px" }} />
+              </div>
+              <span className="editor-stats" style={{ whiteSpace: "nowrap", color: processedCount === totalChunks ? "var(--success)" : "var(--text-muted)" }}>
+                Análisis {Math.round((processedCount / totalChunks) * 100)}%
+              </span>
+            </div>
+          )}
+          {/* Correction review progress bar */}
+          {globalProgress.total > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexShrink: 0 }}>
+              <div style={{ width: "120px", height: "4px", backgroundColor: "var(--border-color)", borderRadius: "2px", overflow: "hidden" }} title="Correcciones revisadas">
+                <div style={{ height: "100%", width: `${globalProgress.pct}%`, backgroundColor: globalProgress.pct === 100 ? "var(--success)" : "#f59e0b", transition: "width 0.4s ease", borderRadius: "2px" }} />
+              </div>
+              <span className="editor-stats" style={{ whiteSpace: "nowrap", color: globalProgress.pct === 100 ? "var(--success)" : "var(--text-muted)" }}>
+                Revisión {globalProgress.pct}%
+              </span>
+            </div>
+          )}
+
           <h1 className="editor-title" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "320px" }}>
             {bookTitle || "Manuscrito"}
           </h1>
-
-          {/* Progress */}
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginLeft: "0.75rem", flexShrink: 0 }}>
-            <div style={{ width: "140px", height: "4px", backgroundColor: "var(--border-color)", borderRadius: "2px", overflow: "hidden" }}>
-              <div style={{ height: "100%", width: `${globalProgress.pct}%`, backgroundColor: globalProgress.pct === 100 ? "var(--success)" : "var(--primary)", transition: "width 0.4s ease", borderRadius: "2px" }} />
-            </div>
-            <span className="editor-stats" style={{ whiteSpace: "nowrap" }}>
-              {globalProgress.resolved}/{globalProgress.total} ({globalProgress.pct}%)
-            </span>
-          </div>
         </div>
 
         <div className="editor-actions" style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexShrink: 0 }}>
           {isProcessing && (
-            <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.8rem", color: "var(--primary)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexShrink: 0, fontSize: "0.8rem", color: "var(--primary)" }}>
               <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
-              <span>{processedCount}/{totalChunks} analizados</span>
+              <span>Analizando… {totalChunks > 0 ? Math.round((processedCount / totalChunks) * 100) : 0}%</span>
             </div>
           )}
           {canManage() && (
@@ -374,8 +387,8 @@ export default function EditorPage() {
           fontSize: "0.8rem", color: "var(--text-muted)", flexShrink: 0,
         }}>
           <div className="pulse-dot" style={{ flexShrink: 0 }} />
-          <span>Analizando: {processedCount}/{totalChunks} segmentos listos — los segmentos aparecen aquí a medida que se procesan</span>
-          <span style={{ marginLeft: "auto", color: "#6366f1", fontWeight: 600 }}>Puedes editar mientras tanto</span>
+          <span>Análisis IA en curso — <strong>{totalChunks > 0 ? Math.round((processedCount / totalChunks) * 100) : 0}% completado</strong>. El texto aparece a medida que se analiza.</span>
+          <span style={{ marginLeft: "auto", color: "#6366f1", fontWeight: 600 }}>Puedes empezar a revisar</span>
         </div>
       )}
 

@@ -496,14 +496,24 @@ export default function EditorPage() {
             >
               {showAnnotations ? "Ocultar marcas" : "Mostrar marcas"}
             </button>
-            {canManage() && (
-              <button className="btn" style={{ whiteSpace: "nowrap" }} onClick={handleNextPhase}>
-                Cerrar Fase ✓
-              </button>
-            )}
+            {canManage() && (() => {
+              const pendingCount = allSuggestions.filter(s => s.status === "pending").length;
+              const allResolved = pendingCount === 0 && allSuggestions.length > 0;
+              return (
+                <button
+                  className="btn"
+                  style={{ whiteSpace: "nowrap", opacity: allResolved ? 1 : 0.45, cursor: allResolved ? "pointer" : "not-allowed" }}
+                  onClick={allResolved ? handleNextPhase : undefined}
+                  title={allResolved ? "Cerrar fase de revisión" : `Faltan ${pendingCount} correcciones por revisar`}
+                >
+                  Cerrar Fase ✓{!allResolved && ` (${pendingCount} pendientes)`}
+                </button>
+              );
+            })()}
             <button className="btn" onClick={handleDownload}
-              style={{ backgroundColor: "var(--success)", display: "flex", alignItems: "center", gap: "0.375rem" }}>
-              <Download size={14} /> .docx
+              title="Descargar manuscrito corregido"
+              style={{ backgroundColor: "var(--success)", display: "flex", alignItems: "center", gap: "0.375rem", flexShrink: 0 }}>
+              <Download size={14} /> Descargar
             </button>
             {/* Panel toggle */}
             <button className="btn-ghost" onClick={() => setPanelCollapsed(v => !v)}

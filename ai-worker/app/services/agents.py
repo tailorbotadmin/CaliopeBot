@@ -141,8 +141,8 @@ class VoiceAnalyzerAgent(BaseAgent):
         "required": ["resumen", "rasgos_clave", "instrucciones_agentes"],
     }
 
-    def __init__(self, client, model: str = "gemini-2.0-flash-001"):
-        super().__init__(client, model, name="voice_analyzer")
+    def __init__(self, client, model: str = "gemini-2.5-flash-lite", vertex_api_key: str = ""):
+        super().__init__(client, model, name="voice_analyzer", vertex_api_key=vertex_api_key)
 
     def run(self, sample_paragraphs: List[str]) -> Dict:
         """Analyze a sample of paragraphs and return a voice profile dict."""
@@ -217,8 +217,8 @@ class CorrectorAgent(BaseAgent):
         },
     }
 
-    def __init__(self, client, vector_store=None, model: str = "gemini-2.0-flash-001"):
-        super().__init__(client, model, name="corrector")
+    def __init__(self, client, vector_store=None, model: str = "gemini-2.5-flash-lite", vertex_api_key: str = ""):
+        super().__init__(client, model, name="corrector", vertex_api_key=vertex_api_key)
         self.vector_store = vector_store
 
     def run(self, text: str, org_id: str, author_id: str, voice_profile: Dict) -> List[Dict]:
@@ -332,8 +332,8 @@ class RevisorAgent(BaseAgent):
         },
     }
 
-    def __init__(self, client, vector_store=None, model: str = "gemini-2.0-flash-001"):
-        super().__init__(client, model, name="revisor")
+    def __init__(self, client, vector_store=None, model: str = "gemini-2.5-flash-lite", vertex_api_key: str = ""):
+        super().__init__(client, model, name="revisor", vertex_api_key=vertex_api_key)
         self.vector_store = vector_store
 
     def run(
@@ -433,8 +433,8 @@ class ArbiterAgent(BaseAgent):
         },
     }
 
-    def __init__(self, client, vector_store=None, model: str = "gemini-2.0-flash-001"):
-        super().__init__(client, model, name="arbiter")
+    def __init__(self, client, vector_store=None, model: str = "gemini-2.5-flash-lite", vertex_api_key: str = ""):
+        super().__init__(client, model, name="arbiter", vertex_api_key=vertex_api_key)
         self.vector_store = vector_store
 
     def run(

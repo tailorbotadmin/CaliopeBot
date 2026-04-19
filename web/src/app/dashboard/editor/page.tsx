@@ -75,15 +75,32 @@ function buildSegments(text: string, suggestions: Suggestion[], globalOffset: nu
 }
 
 function AnnotatedText({
-  chunk, suggestions, globalOffset, selectedId, onSelect, showAnnotations,
+  chunk, suggestions, globalOffset, selectedId, onSelect, showAnnotations, correctedView,
 }: {
   chunk: Chunk; suggestions: Suggestion[]; globalOffset: number;
   selectedId: string | null; onSelect: (id: string) => void; showAnnotations: boolean;
+  correctedView: boolean;
 }) {
+  // In corrected view: apply accepted/edited corrections to produce clean text
+  const correctedText = useMemo(() => {
+    if (!correctedView) return null;
+    let text = chunk.text || "";
+    suggestions.forEach(s => {
+      if (s.status === "accepted" || s.status === "edited") {
+        text = text.replace(s.originalText, s.correctedText);
+      }
+    });
+    return text;
+  }, [correctedView, chunk.text, suggestions]);
+
   const segments = useMemo(
     () => buildSegments(chunk.text || "", suggestions, globalOffset),
     [chunk.text, suggestions, globalOffset]
   );
+
+  if (correctedView) {
+    return <span style={{ color: "var(--text-main)" }}>{correctedText}</span>;
+  }
 
   if (!showAnnotations || suggestions.length === 0) {
     return <span>{chunk.text}</span>;
@@ -152,6 +169,7 @@ export default function EditorPage() {
   const [categoryFilter, setCategoryFilter] = useState("Todos");
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [showAnnotations, setShowAnnotations] = useState(true);
+  const [correctedView, setCorrectedView] = useState(false);
 
   const docPaneRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -491,10 +509,23 @@ export default function EditorPage() {
             {/* Annotation toggle */}
             <button
               className="btn btn-secondary"
-              onClick={() => setShowAnnotations(v => !v)}
-              style={{ fontSize: "0.75rem", padding: "0.35rem 0.65rem" }}
+              onClick={() => { setShowAnnotations(v => !v); setCorrectedView(false); }}
+              style={{ fontSize: "0.75rem", padding: "0.35rem 0.65rem", opacity: correctedView ? 0.4 : 1 }}
             >
               {showAnnotations ? "Ocultar marcas" : "Mostrar marcas"}
+            </button>
+            {/* Corrected view toggle */}
+            <button
+              className="btn btn-secondary"
+              onClick={() => setCorrectedView(v => !v)}
+              style={{ fontSize: "0.75rem", padding: "0.35rem 0.65rem",
+                backgroundColor: correctedView ? "var(--success)" : undefined,
+                color: correctedView ? "#fff" : undefined,
+                borderColor: correctedView ? "var(--success)" : undefined,
+              }}
+              title={correctedView ? "Volver a vista con marcas" : "Ver texto con correcciones aplicadas"}
+            >
+              {correctedView ? "✓ Texto corregido" : "Ver corregido"}
             </button>
             {canManage() && (() => {
               const pendingCount = allSuggestions.filter(s => s.status === "pending").length;
@@ -557,7 +588,8 @@ export default function EditorPage() {
                   globalOffset={offset}
                   selectedId={selectedId}
                   onSelect={handleSelectCorrection}
-                  showAnnotations={showAnnotations}
+                  showAnnotations={showAnnotations && !correctedView}
+                  correctedView={correctedView}
                 />
               </p>
             );

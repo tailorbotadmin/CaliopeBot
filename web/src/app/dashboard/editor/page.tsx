@@ -232,11 +232,15 @@ export default function EditorPage() {
     return () => clearTimeout(t);
   }, [chunks.length, bookStatus]);
 
-  // ── All suggestions flat list ────────────────────────────────────────
+  // ── All suggestions flat list (filtered: only valid originalText matches) ──
   const allSuggestions = useMemo(() => {
     const list: (Suggestion & { chunkId: string; chunkOrder: number })[] = [];
     chunks.forEach(chunk => {
       (chunk.suggestions ?? []).forEach(s => {
+        // Skip hallucinations: originalText must exist in chunk and differ from correctedText
+        if (!s.originalText) return;
+        if (s.originalText === s.correctedText) return;
+        if (!(chunk.text ?? "").includes(s.originalText)) return;
         list.push({ ...s, chunkId: chunk.id, chunkOrder: chunk.order });
       });
     });

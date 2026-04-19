@@ -496,6 +496,18 @@ async def process_book_background(org_id: str, book_id: str, author_id: str):
                         final_suggestions = approved
                 # If no corrections from either agent, final_suggestions stays []
 
+                # ── Sanity filter: remove corrections whose originalText isn't in the text ─
+                # Prevents LLM hallucinations (e.g. "europa" when text has "Europa")
+                valid_suggestions = [
+                    s for s in final_suggestions
+                    if s.get("originalText", "") and s["originalText"] in text
+                    and s.get("originalText") != s.get("correctedText")  # skip no-op corrections
+                ]
+                if len(valid_suggestions) < len(final_suggestions):
+                    dropped = len(final_suggestions) - len(valid_suggestions)
+                    logger.info(f"[book={book_id} chunk={chunk.id}] Dropped {dropped} hallucinated/no-op corrections")
+                final_suggestions = valid_suggestions
+
                 # ── Commit this chunk immediately (progressive loading) ────────
                 chunks_ref.document(chunk.id).update({
                     "status": "processed",

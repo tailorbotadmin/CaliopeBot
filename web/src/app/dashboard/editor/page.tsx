@@ -266,13 +266,25 @@ export default function EditorPage() {
     if (!effectiveOrgId || !bookId) return;
     const chunk = chunks.find(c => c.id === chunkId);
     if (!chunk) return;
+
+    // Optimistic update: apply locally immediately so reviewPct updates instantly
+    setChunks(prev => prev.map(c =>
+      c.id === chunkId ? { ...c, suggestions: newSuggestions } : c
+    ));
+
     try {
       await setDoc(
         doc(db, "organizations", effectiveOrgId, "books", bookId, "chunks", chunkId),
         { ...chunk, suggestions: newSuggestions },
         { merge: true }
       );
-    } catch (e) { console.error("Error saving:", e); }
+    } catch (e) {
+      console.error("Error saving:", e);
+      // Rollback optimistic update on failure
+      setChunks(prev => prev.map(c =>
+        c.id === chunkId ? { ...c, suggestions: chunk.suggestions } : c
+      ));
+    }
   };
 
   const updateSuggestionInChunk = async (

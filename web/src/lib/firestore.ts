@@ -52,6 +52,7 @@ export interface Book {
   createdAt: FirestoreDate;
   assignedEditorId?: string;
   assignedEditorName?: string;
+  language?: string;   // BCP 47: "es", "ca", "en-GB" ...
 }
 
 export async function updateBookStatus(orgId: string, bookId: string, status: string, errorMessage?: string) {

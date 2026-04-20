@@ -24,6 +24,21 @@ import Link from "next/link";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+// Flag emoji per language code
+const LANG_FLAG: Record<string, { flag: string; label: string }> = {
+  es:    { flag: "🇪🇸", label: "Español" },
+  "es-ES": { flag: "🇪🇸", label: "Español" },
+  ca:    { flag: "🏴", label: "Català" },
+  "ca-ES": { flag: "🏴", label: "Català" },
+  en:    { flag: "🇬🇧", label: "English" },
+  "en-GB": { flag: "🇬🇧", label: "English" },
+  "en-US": { flag: "🇺🇸", label: "English (US)" },
+  fr:    { flag: "🇫🇷", label: "Français" },
+  de:    { flag: "🇩🇪", label: "Deutsch" },
+  it:    { flag: "🇮🇹", label: "Italiano" },
+  pt:    { flag: "🇵🇹", label: "Português" },
+};
+
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
   draft:               { label: "Borrador",           color: "var(--text-muted)",  bg: "var(--border-color)" },
   processing:          { label: "Analizando…",         color: "#f59e0b",            bg: "rgba(245,158,11,0.12)" },
@@ -620,13 +635,13 @@ export default function BooksPage() {
         <div className="card-static" style={{ overflow: "hidden", padding: 0 }}>
           {/* Horizontal scroll wrapper — activates when viewport is too narrow */}
           <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-          {/* Table — min-width ensures columns never collapse */}
-          <div style={{ minWidth: "820px" }}>
-          {/* List header — 5 columns (title+author merged) */}
+          {/* Table — 7 columns */}
+          <div style={{ minWidth: "960px" }}>
+          {/* List header */}
           <div style={{
             display: "grid",
-            gridTemplateColumns: "minmax(200px,2fr) minmax(150px,1.2fr) 135px 90px minmax(170px,auto)",
-            gap: "0 0.75rem",
+            gridTemplateColumns: "minmax(160px,2fr) minmax(90px,0.9fr) 52px minmax(130px,1.1fr) 125px 80px minmax(170px,auto)",
+            gap: "0 0.5rem",
             padding: "0.625rem 1.25rem",
             borderBottom: "1px solid var(--border-color)",
             fontSize: "0.7rem",
@@ -635,7 +650,9 @@ export default function BooksPage() {
             letterSpacing: "0.05em",
             color: "var(--text-muted)",
           }}>
-            <span>Manuscrito / Autor</span>
+            <span>Manuscrito</span>
+            <span>Autor</span>
+            <span>Idioma</span>
             <span>Editor asignado</span>
             <span>Estado</span>
             <span>Fecha</span>
@@ -654,8 +671,8 @@ export default function BooksPage() {
                 key={book.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "minmax(200px,2fr) minmax(150px,1.2fr) 135px 90px minmax(170px,auto)",
-                  gap: "0 0.75rem",
+                  gridTemplateColumns: "minmax(160px,2fr) minmax(90px,0.9fr) 52px minmax(130px,1.1fr) 125px 80px minmax(170px,auto)",
+                  gap: "0 0.5rem",
                   padding: "0.875rem 1.25rem",
                   alignItems: "center",
                   borderBottom: isLast ? "none" : "1px solid var(--border-color)",
@@ -665,32 +682,43 @@ export default function BooksPage() {
                 onMouseEnter={e => (e.currentTarget.style.background = "var(--bg-color)")}
                 onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
               >
-                {/* Title + author + filename in one compact cell */}
+                {/* Manuscrito — title + filename */}
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.15rem" }}>
-                    <FileText size={15} style={{ color: "var(--primary)", flexShrink: 0 }} />
-                    <span style={{ fontWeight: 700, fontSize: "0.9375rem", color: "var(--text-main)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.1rem" }}>
+                    <FileText size={14} style={{ color: "var(--primary)", flexShrink: 0 }} />
+                    <span style={{ fontWeight: 700, fontSize: "0.9rem", color: "var(--text-main)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                       {book.title}
                     </span>
                   </div>
-                  {/* Author as sub-line — right under the title */}
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.25rem", paddingLeft: "1.4rem" }}>
-                    <UserCircle2 size={11} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
-                    <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {book.authorName
-                        ?? [...orgAuthors, ...orgEditors].find(u => u.uid === book.authorId)?.displayName
-                        ?? (book.authorId === user?.uid ? (user?.displayName ?? user?.email ?? "Yo") : "Autor")}
-                    </span>
-                  </div>
                   {book.fileName && (
-                    <span style={{ fontSize: "0.68rem", color: "var(--text-muted)", paddingLeft: "1.4rem", opacity: 0.7 }}>{book.fileName}</span>
+                    <span style={{ fontSize: "0.67rem", color: "var(--text-muted)", paddingLeft: "1.35rem", opacity: 0.75 }}>{book.fileName}</span>
                   )}
                   {book.status === "error" && (
-                    <p style={{ fontSize: "0.68rem", color: "#ef4444", marginTop: "0.2rem", paddingLeft: "1.4rem" }}>
+                    <p style={{ fontSize: "0.67rem", color: "#ef4444", marginTop: "0.2rem", paddingLeft: "1.35rem" }}>
                       Error en la edición — usa Reintentar
                     </p>
                   )}
                 </div>
+
+                {/* Autor */}
+                <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "0.25rem", overflow: "hidden" }}>
+                  <UserCircle2 size={12} style={{ flexShrink: 0 }} />
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {book.authorName
+                      ?? [...orgAuthors, ...orgEditors].find(u => u.uid === book.authorId)?.displayName
+                      ?? (book.authorId === user?.uid ? (user?.displayName ?? user?.email?.split("@")[0] ?? "Yo") : "Autor")}
+                  </span>
+                </div>
+
+                {/* Idioma — flag */}
+                {(() => {
+                  const lang = LANG_FLAG[book.language ?? "es"] ?? LANG_FLAG["es"];
+                  return (
+                    <div title={lang.label} style={{ textAlign: "center", fontSize: "1.1rem", lineHeight: 1 }}>
+                      {lang.flag}
+                    </div>
+                  );
+                })()}
 
                 {/* Editor asignado column — dropdown for admins, label for others */}
                 <div style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>

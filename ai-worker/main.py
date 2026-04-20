@@ -640,20 +640,54 @@ async def ingest_book(request: IngestRequest, background_tasks: BackgroundTasks)
             .collection("books").document(request.bookId).collection("chunks")
         )
 
-        # Batch with proper 500 limit handling
+        # ── Helper: detect explicit page break in a paragraph's XML ─────────
+        def _para_has_page_break(para) -> bool:
+            """True if the paragraph contains an explicit page break (w:br type="page")."""
+            xml = para._element.xml
+            return 'w:type="page"' in xml or "w:type='page'" in xml
+
+        # ── Helper: clean numeric artifacts fused with words ─────────────────
+        # Word sometimes embeds footnote/endnote markers or page numbers
+        # directly in the text content, producing tokens like "Detrás75" or "también2".
+        # We remove standalone digits that are fused to the START or END of a word.
+        _ARTIFACT_RE = re.compile(
+            r'(\b[A-Za-záéíóúüñÁÉÍÓÚÜÑ]{2,})\d+\b'   # word followed by digits: "Detrás75"
+            r'|\b\d+([A-Za-záéíóúüñÁÉÍÓÚÜÑ]{2,}\b)'  # digits followed by word: "75Detrás"
+        )
+        def _clean_text(raw: str) -> str:
+            # Remove fused numeric artifacts but preserve real numeric content
+            cleaned = _ARTIFACT_RE.sub(lambda m: m.group(1) or m.group(2), raw)
+            # Collapse multiple spaces
+            cleaned = re.sub(r'  +', ' ', cleaned)
+            return cleaned.strip()
+
+        # ── Build chunks with page tracking ──────────────────────────────────
         all_chunks = []
         chunk_index = 0
+        current_page = 1
+
         for para in doc.paragraphs:
-            text = para.text.strip()
-            if text:
-                all_chunks.append({
-                    "id": f"chunk_{str(chunk_index).zfill(4)}",
-                    "text": text,
-                    "style": para.style.name if para.style else "Normal",
-                    "status": "pending",
-                    "order": chunk_index,
-                })
-                chunk_index += 1
+            # Page break BEFORE processing this paragraph bumps the page counter
+            if _para_has_page_break(para):
+                current_page += 1
+
+            raw_text = para.text.strip()
+            if not raw_text:
+                continue
+
+            text = _clean_text(raw_text)
+            if not text:
+                continue
+
+            all_chunks.append({
+                "id": f"chunk_{str(chunk_index).zfill(4)}",
+                "text": text,
+                "style": para.style.name if para.style else "Normal",
+                "status": "pending",
+                "order": chunk_index,
+                "page": current_page,
+            })
+            chunk_index += 1
 
         # Commit in batches of 450 (safe margin under 500 limit)
         for i in range(0, len(all_chunks), 450):
@@ -672,18 +706,20 @@ async def ingest_book(request: IngestRequest, background_tasks: BackgroundTasks)
             "status": "processing",
             "totalChunks": len(all_chunks),
             "processedChunks": 0,
+            "totalPages": current_page,
         })
 
         background_tasks.add_task(
             process_book_background, request.organizationId, request.bookId, request.authorId
         )
 
-        logger.info(f"Ingested book {request.bookId}: {len(all_chunks)} chunks")
-        return {"status": "success", "total_chunks": len(all_chunks)}
+        logger.info(f"Ingested book {request.bookId}: {len(all_chunks)} chunks across {current_page} pages")
+        return {"status": "success", "total_chunks": len(all_chunks), "total_pages": current_page}
 
     except Exception as e:
         logger.error(f"Ingest error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.post("/api/v1/extract-rules")

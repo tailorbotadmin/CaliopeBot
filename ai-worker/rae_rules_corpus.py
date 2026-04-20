@@ -204,4 +204,145 @@ RAE_RULES = [
         "category": "format",
         "source": "RAE Ortografía 2010, §4.3",
     },
+
+    # ── REGLAS ESPECÍFICAS DEL INFORME — DEQUEÍSMO ────────────────────────
+    {
+        "name": "Dequeísmo con «opinar»",
+        "description": "El verbo «opinar» rige complemento directo introducido por «que», nunca por «de que». Incorrecto: «Muchos expertos opinan de que el sistema necesita cambios». Correcto: «opinan que el sistema necesita cambios». Prueba de sustitución: si puedes reemplazar la subordinada por «eso» sin «de», no se usa «de que».",
+        "category": "grammar",
+        "source": "RAE DPD, s.v. dequeísmo",
+    },
+    {
+        "name": "Dequeísmo con «pensar»",
+        "description": "El verbo «pensar» no rige preposición «de» ante completiva. Incorrecto: «Hay quienes piensan de que la tecnología resolverá el problema». Correcto: «piensan que la tecnología resolverá el problema». Prueba: «piensan eso» (no «piensan de eso»).",
+        "category": "grammar",
+        "source": "RAE DPD, s.v. dequeísmo",
+    },
+    {
+        "name": "Dequeísmo: verbos que NUNCA llevan «de que»",
+        "description": "Los verbos de opinión y pensamiento (creer, pensar, opinar, decir, saber, recordar, suponer, imaginar, soñar) van seguidos de «que» directamente. Si se añade «de» es dequeísmo. Prueba: sustituye la subordinada por «eso»; si no cabe «de eso», tampoco cabe «de que».",
+        "category": "grammar",
+        "source": "RAE DPD, s.v. dequeísmo",
+    },
+
+    # ── REGLAS ESPECÍFICAS — RÉGIMEN PREPOSICIONAL ────────────────────────
+    {
+        "name": "Régimen preposicional: «en relación con» / «con relación a»",
+        "description": "La locución preposicional correcta es «con relación a» o «en relación con». La forma híbrida «en relación a» es incorrecta. Ej. incorrecto: «En relación a este tema, cabe señalar…». Correcto: «En relación con este tema» o «Con relación a este tema».",
+        "category": "grammar",
+        "source": "RAE DPD, s.v. relación",
+    },
+
+    # ── REGLAS ESPECÍFICAS — TILDES DIACRÍTICAS ───────────────────────────
+    {
+        "name": "Tilde diacrítica en «él» (pronombre personal)",
+        "description": "El pronombre personal «él» siempre lleva tilde para distinguirlo del artículo «el». Ej. correcto: «creyó en él»; incorrecto: «creyó en el» (cuando se refiere a una persona). Norma: OLE 2010, §3.4.3.1.",
+        "category": "grammar",
+        "source": "RAE Ortografía 2010, §3.4.3.1",
+    },
+    {
+        "name": "Tilde diacrítica en «cuál» interrogativo indirecto",
+        "description": "El pronombre «cuál» lleva tilde diacrítica cuando funciona como interrogativo o exclamativo, aunque la pregunta sea indirecta. Ej. incorrecto: «no se sabe cual debe ser el objetivo». Correcto: «cuál debe ser el objetivo».",
+        "category": "grammar",
+        "source": "RAE Ortografía 2010, §3.4.3.3",
+    },
+    {
+        "name": "«Dio», «fue», «vio» no llevan tilde",
+        "description": "Los monosílabos «dio», «fue», «vio» no llevan tilde. Son monosílabos sin par diacrítico. Ej. incorrecto: «le dió las herramientas». Correcto: «le dio las herramientas». La RAE eliminó esta tilde en 1959 y ratificó en 2010.",
+        "category": "grammar",
+        "source": "RAE Ortografía 2010, §3.4.1.1",
+    },
+    {
+        "name": "Demostrativos (este, ese, aquel) sin tilde",
+        "description": "Desde la OLE 2010, los pronombres demostrativos (este, ese, aquel, esta, esa, aquella y sus plurales) NO llevan tilde en ningún caso. Ej. incorrecto: «consideran que ésta es fundamental»; correcto: «esta es fundamental». Tampoco «aquéllos»; correcto: «aquellos».",
+        "category": "grammar",
+        "source": "RAE Ortografía 2010, §3.4.3.3",
+    },
+    {
+        "name": "«A fin de» sin tilde (no «a fín de»)",
+        "description": "La locución preposicional es «a fin de» (sin tilde). «Fin» es monosílabo y no lleva tilde. La forma «a fín de» es incorrecta y resultado de ultracorrección.",
+        "category": "typography",
+        "source": "RAE Ortografía 2010, §3.4.1",
+    },
+
+    # ── REGLAS ESPECÍFICAS — EXTRANJERISMOS ───────────────────────────────
+    {
+        "name": "«online» → «en línea»",
+        "description": "El extranjerismo «online» debe sustituirse por el equivalente español «en línea» o escribirse en cursiva si se mantiene. La RAE recomienda «en línea» (OLE 2010, §2.1.2).",
+        "category": "style",
+        "source": "RAE OLE 2010, §2.1.2; Fundéu",
+    },
+    {
+        "name": "«curriculum» → «currículo»",
+        "description": "La forma adaptada al español del latinismo «curriculum» es «currículo» (con tilde y terminación española). El uso de «curriculum» sin adaptar se considera innecesario cuando existe la forma española. DLE, 23.ª ed.",
+        "category": "style",
+        "source": "RAE DLE 23.ª ed., s.v. currículo",
+    },
+    {
+        "name": "«tablets» → «tabletas»",
+        "description": "El anglicismo «tablet/tablets» debe sustituirse por «tableta/tabletas» o escribirse en cursiva. La RAE recomienda «tableta» (DLE, 23.ª ed.). Ej. incorrecto: «El uso de tablets»; correcto: «El uso de tabletas».",
+        "category": "style",
+        "source": "RAE DLE 23.ª ed., s.v. tableta",
+    },
+    {
+        "name": "«jugar un rol» → «desempeñar un papel»",
+        "description": "La expresión «jugar un rol» es calco del inglés «play a role» / francés «jouer un rôle». En español se dice «desempeñar un papel» o «cumplir una función». «Rol» está aceptado por la RAE en contextos sociológicos y teatrales, pero «jugar un rol» sigue siendo calco.",
+        "category": "style",
+        "source": "RAE DPD; Fundéu",
+    },
+
+    # ── REGLAS ESPECÍFICAS — LÉXICO Y MORFOLOGÍA ──────────────────────────
+    {
+        "name": "«sustituir» (no «substituir»)",
+        "description": "La forma normativa preferida es «sustituir». La variante «substituir» es arcaica y desaconsejada por la RAE. Ej. incorrecto: «el riesgo de substituir al profesor»; correcto: «el riesgo de sustituir al profesor».",
+        "category": "grammar",
+        "source": "RAE DPD, s.v. sustituir",
+    },
+    {
+        "name": "«conciencia» (no «consciencia» para uso ético/moral)",
+        "description": "En el sentido de 'conocimiento moral' o 'percatarse de algo', la forma normativa es «conciencia». «Consciencia» existe referida al estado de vigilia. La locución fija es «tomar conciencia», no «tomar consciencia».",
+        "category": "grammar",
+        "source": "RAE DPD, s.v. conciencia",
+    },
+    {
+        "name": "«por ciento» (no «por cien» tras numeral)",
+        "description": "La forma completa es «por ciento». La apócope «por cien» solo es válida antepuesta directamente a un sustantivo (cien por cien). Tras un numeral es incorrecto: «el 35 por cien de los centros» → correcto: «el 35 por ciento de los centros».",
+        "category": "grammar",
+        "source": "RAE DPD, s.v. ciento",
+    },
+    {
+        "name": "«sino» (conjunción adversativa) vs. «si no» (condicional negativa)",
+        "description": "La conjunción adversativa «sino» se escribe en una sola palabra: «no solo es cuestión de justicia, sino también de solidaridad». «Si no» (dos palabras) es condicional negativa: «si no vienes, avísame».",
+        "category": "grammar",
+        "source": "RAE OLE 2010; DPD, s.v. sino",
+    },
+    {
+        "name": "Mezcla de cifras y palabras en numerales",
+        "description": "Los numerales no deben mezclar cifras y palabras en el mismo número. Incorrecto: «para el año 2000 veintisiete». Correcto: «para el año 2027» o «para el año dos mil veintisiete». Norma: OLE 2010, §5.2.",
+        "category": "style",
+        "source": "RAE Ortografía 2010, §5.2",
+    },
+
+    # ── REGLAS ESPECÍFICAS — PREFIJOS ─────────────────────────────────────
+    {
+        "name": "Prefijos se escriben sin guion ante palabra simple",
+        "description": "Los prefijos (socio-, extra-, pre-, anti-, sub-, inter-, etc.) se escriben unidos sin guion cuando la base es una palabra simple: «sociocultural» (no «socio-cultural»), «extraescolar» (no «extra-escolar»). El guion solo se usa ante siglas, nombres propios o cuando la base es un numeral.",
+        "category": "typography",
+        "source": "RAE Ortografía 2010, §4.1.1.2",
+    },
+    {
+        "name": "«máster» (no «Master» ni «master»)",
+        "description": "La voz adaptada al español es «máster» en minúscula con tilde (llana terminada en consonante distinta de -n/-s). «Master» sin tilde y con mayúscula «Master» son incorrectos. Ej. incorrecto: «El Master de Formación»; correcto: «El máster de formación».",
+        "category": "style",
+        "source": "RAE DLE 23.ª ed., s.v. máster",
+    },
+
+    # ── REGLAS ESPECÍFICAS — ORTOTIPOGRAFÍA ───────────────────────────────
+    {
+        "name": "División silábica correcta de palabras con guion tipográfico",
+        "description": "Al dividir palabras al final de línea con guion tipográfico, no puede separarse un grupo consonántico dejando consonante de inicio silábico al inicio de línea. La sílaba debe respetar la estructura silábica española. «adap-tán-do-se» es correcto; «adaptan-dose» (sin tilde) es incorrecto. Los gerundios con enclítico forman una sola palabra y llevan tilde si son esdrújulos.",
+        "category": "typography",
+        "source": "RAE Ortografía 2010, §4.2",
+    },
 ]
+

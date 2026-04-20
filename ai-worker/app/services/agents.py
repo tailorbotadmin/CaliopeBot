@@ -266,14 +266,45 @@ Sé exhaustivo: un informe académico o técnico tiene errores ortotipográficos
 {text}
 
 ════ TU MISIÓN ════
-Identifica fragmentos del texto que violen las reglas editoriales anteriores.
-Para cada fragmento:
+Revisa el texto anterior EXHAUSTIVAMENTE buscando todos los tipos de error. Para cada error:
 - originalText: copia EXACTA del fragmento que debe cambiar (debe aparecer literalmente en el texto)
 - correctedText: la versión corregida
-- justification: explica qué regla viola y por qué tu corrección es mejor
-- reglaAplicada: nombre o número de la regla editorial aplicada (si la conoces)
+- justification: explica qué regla RAE viola y por qué tu corrección es correcta
+- reglaAplicada: nombre o número de la regla editorial aplicada
 - riskLevel: "low" si es error claro, "medium" si puede ser opinable, "high" si puede ser elección del autor
-- category: una de estas categorías exactas → Tildes | Gramática | Puntuación | Extranjerismos | Ortografía | Léxico | Tipografía
+- category: una de estas → Tildes | Gramática | Puntuación | Extranjerismos | Ortografía | Léxico | Tipografía
+
+TIPOS DE ERROR QUE DEBES BUSCAR SIEMPRE (no son opcionales):
+
+1. TILDES Y ACENTOS:
+   • Palabras sin tilde obligatoria (agudas en -n/-s/-vocal, esdrújulas, sobresdrújulas)
+   • Tildes diacríticas: «él» (pronombre) vs «el» (artículo), «cuál/cuáles» interrogativo, «más» adverbio vs «mas» conjunción
+   • Tildes incorrectas en monosílabos: «dió», «fué», «vió» — son incorrectas, léase «dio», «fue», «vio»
+   • Demostrativos con tilde innecesaria: «éste», «ésta», «aquél» — deben ir SIN tilde (norma 2010)
+
+2. DEQUEÍSMO (busca activamente):
+   • «opinar de que», «pensar de que», «creer de que», «decir de que» → eliminar «de»
+   • Prueba: si puedes sustituir la subordinada por «eso» sin «de», la «de» es dequeísmo
+
+3. RÉGIMEN PREPOSICIONAL:
+   • «en relación a» → «en relación con» o «con relación a»
+   • «hacer mención de» vs «hacer mención a», «confiar en», etc.
+
+4. EXTRANJERISMOS (cuando hay equivalente español preferido):
+   • «online» → «en línea» | «tablet/tablets» → «tableta/tabletas» | «curriculum» → «currículo»
+   • «rol» en «jugar un rol» → «desempeñar un papel» | «master» sin adaptar → «máster»
+   • Extranjerismos que deberían ir en cursiva si se mantienen
+
+5. LÉXICO Y MORFOLOGÍA:
+   • «substituir» → «sustituir» | «consciencia» (moral) → «conciencia» | «por cien» tras numeral → «por ciento»
+   • «si no también» (adversativa) → «sino también»
+   • Mezcla de cifras y letras en el mismo numeral
+
+6. PREFIJOS SIN GUION:
+   • «socio-cultural» → «sociocultural» | «extra-escolar» → «extraescolar» | «pre-» + palabra simple
+
+7. ORTOGRAFÍA GENERAL:
+   • Concordancia de género y número | Uso de mayúsculas | Errores tipográficos
 
 PROHIBIDO:
 ✗ Reescribir el texto completo

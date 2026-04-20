@@ -38,6 +38,7 @@ type Chunk = {
   text: string;
   order: number;
   status: string;
+  style?: string;
   suggestions?: Suggestion[];
 };
 
@@ -50,6 +51,24 @@ const STATUS_COLOR: Record<CorrectionStatus, { bg: string; border: string; text:
 };
 
 const CATEGORIES = ["Todos", "Tildes", "Gramática", "Puntuación", "Extranjerismos", "Ortografía", "Léxico", "Tipografía"];
+
+// ── Chapter / section detection ────────────────────────────────────────────────
+function detectChapterHeader(chunk: Chunk): boolean {
+  const style = (chunk.style ?? "").toLowerCase();
+  if (
+    style.includes("heading") ||
+    style.includes("título") ||
+    style.includes("titulo") ||
+    style.includes("chapter") ||
+    style.includes("section")
+  ) return true;
+  // Heuristic: short text (<= 120 chars) starting with "N " or "N. " + capital letter
+  const text = chunk.text.trim();
+  if (text.length <= 120 && /^\d+[\s\.]+[A-ZÁÉÍÓÚÑÜ]/u.test(text)) return true;
+  return false;
+}
+
+type ChapterGroup = { id: string; title: string; chunkIds: Set<string> };
 
 // ── AnnotatedText ─────────────────────────────────────────────────────────────
 // Renders a chunk's text with inline highlighted correction spans.
@@ -159,6 +178,7 @@ export default function EditorPage() {
   const [categoryFilter, setCategoryFilter] = useState("Todos");
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [showAnnotations, setShowAnnotations] = useState(true);
+  const [collapsedChapters, setCollapsedChapters] = useState<Set<string>>(new Set());
 
   const docPaneRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -244,6 +264,40 @@ export default function EditorPage() {
       : allSuggestions.filter(s => s.category === categoryFilter),
     [allSuggestions, categoryFilter]
   );
+
+  // ── Group chunks into chapter sections ───────────────────────────────
+  const chapterGroups = useMemo((): ChapterGroup[] => {
+    const groups: ChapterGroup[] = [];
+    let current: ChapterGroup | null = null;
+    chunks.forEach(chunk => {
+      if (detectChapterHeader(chunk)) {
+        current = { id: `ch-${chunk.id}`, title: chunk.text.trim(), chunkIds: new Set([chunk.id]) };
+        groups.push(current);
+      } else {
+        if (!current) {
+          current = { id: "ch-preamble", title: "Documento", chunkIds: new Set() };
+          groups.push(current);
+        }
+        current.chunkIds.add(chunk.id);
+      }
+    });
+    return groups;
+  }, [chunks]);
+
+  const toggleChapter = useCallback((id: string) => {
+    setCollapsedChapters(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const allCollapsed = chapterGroups.length > 0 && collapsedChapters.size === chapterGroups.length;
+  const toggleAllChapters = useCallback(() => {
+    setCollapsedChapters(prev =>
+      prev.size === chapterGroups.length ? new Set() : new Set(chapterGroups.map(g => g.id))
+    );
+  }, [chapterGroups]);
 
   // Global progress
   const analysisPct = totalChunks > 0 ? Math.round((processedCount / totalChunks) * 100) : 0;
@@ -408,6 +462,138 @@ export default function EditorPage() {
     if (["SuperAdmin", "Responsable_Editorial", "Editor"].includes(role)) return true;
     if (role === "Autor") return ["review_author", "review_responsable", "approved"].includes(bookStatus);
     return false;
+  };
+
+  // ── Render one correction card (shared by flat and grouped views) ─────
+  const renderCorrectionCard = (sugg: typeof allSuggestions[0]) => {
+    const col = STATUS_COLOR[sugg.status];
+    const isSelected = selectedId === sugg.id;
+    const isEditing = editingId === sugg.id;
+    const globalIdx = allSuggestions.findIndex(s => s.id === sugg.id);
+    return (
+      <div
+        key={sugg.id}
+        id={`panel-card-${sugg.id}`}
+        style={{
+          margin: "0 0.75rem 0.5rem",
+          borderRadius: "var(--radius-md)",
+          border: `1px solid ${isSelected ? col.border : "var(--border-color)"}`,
+          backgroundColor: isSelected ? col.bg : "var(--bg-color)",
+          transition: "all 0.15s",
+          overflow: "hidden",
+        }}
+      >
+        {/* Card header */}
+        <div
+          onClick={() => isSelected ? setSelectedId(null) : handleSelectCorrection(sugg.id)}
+          style={{
+            padding: "0.625rem 0.875rem",
+            cursor: "pointer",
+            display: "flex", alignItems: "flex-start", gap: "0.5rem",
+          }}
+        >
+          <span style={{
+            flexShrink: 0, width: "20px", height: "20px", borderRadius: "50%",
+            backgroundColor: col.border, color: "#fff",
+            fontSize: "0.65rem", fontWeight: 800,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            marginTop: "2px",
+          }}>
+            {globalIdx + 1}
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.25rem" }}>
+              <span style={{ fontSize: "0.65rem", fontWeight: 700, color: col.text, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                {sugg.category ?? "Ortografía"}
+              </span>
+              <span style={{ fontSize: "0.6rem", color: "var(--text-muted)", fontStyle: "italic" }}>
+                {sugg.status === "pending" ? "Pendiente" : sugg.status === "accepted" ? "✓ Aceptada" : sugg.status === "rejected" ? "✕ Rechazada" : "✎ Editada (pendiente)"}
+              </span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", flexWrap: "wrap", fontFamily: "monospace", fontSize: "0.8rem" }}>
+              <span style={{ textDecoration: "line-through", color: STATUS_COLOR.pending.text, backgroundColor: "rgba(239,68,68,0.08)", padding: "0 4px", borderRadius: "3px" }}>
+                {sugg.originalText.length > 30 ? sugg.originalText.slice(0, 30) + "…" : sugg.originalText}
+              </span>
+              <span style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>→</span>
+              <span style={{ color: STATUS_COLOR.accepted.text, backgroundColor: "rgba(16,185,129,0.08)", padding: "0 4px", borderRadius: "3px" }}>
+                {sugg.correctedText.length > 30 ? sugg.correctedText.slice(0, 30) + "…" : sugg.correctedText}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Expanded detail */}
+        {isSelected && (
+          <div style={{ borderTop: "1px solid var(--border-color)", padding: "0.75rem 0.875rem", backgroundColor: "var(--bg-surface)" }}>
+            <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontStyle: "italic", marginBottom: "0.75rem", lineHeight: 1.5 }}>
+              {sugg.justification}
+            </p>
+            {sugg.editorJustification && (
+              <p style={{ fontSize: "0.78rem", color: STATUS_COLOR.edited.text, marginBottom: "0.75rem", lineHeight: 1.5 }}>
+                ✎ Nota del editor: {sugg.editorJustification}
+              </p>
+            )}
+            {isEditing ? (
+              <div>
+                <label style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--text-muted)", display: "block", marginBottom: "0.25rem" }}>
+                  Corrección editada
+                </label>
+                <input
+                  className="input"
+                  style={{ marginBottom: "0.5rem", fontSize: "0.875rem" }}
+                  value={editText}
+                  onChange={e => setEditText(e.target.value)}
+                  autoFocus
+                />
+                <label style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--text-muted)", display: "block", marginBottom: "0.25rem" }}>
+                  Justificación del editor *
+                </label>
+                <textarea
+                  className="input"
+                  rows={2}
+                  style={{ marginBottom: "0.75rem", fontSize: "0.8rem", resize: "vertical" }}
+                  placeholder="Explica por qué realizas este cambio…"
+                  value={editJustification}
+                  onChange={e => setEditJustification(e.target.value)}
+                />
+                <div style={{ display: "flex", gap: "0.4rem" }}>
+                  <button className="btn" style={{ flex: 1, padding: "0.35rem", fontSize: "0.78rem" }}
+                    onClick={() => handleSaveEdit(sugg.id)}>
+                    Guardar ✓
+                  </button>
+                  <button className="btn btn-secondary" style={{ flex: 1, padding: "0.35rem", fontSize: "0.78rem" }}
+                    onClick={() => setEditingId(null)}>
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            ) : canManage() && sugg.status === "pending" ? (
+              <div style={{ display: "flex", gap: "0.4rem" }}>
+                <button className="btn-action accept" onClick={() => handleAccept(sugg.id)} style={{ flex: 1, padding: "0.4rem", borderRadius: "var(--radius-sm)", border: `1px solid ${STATUS_COLOR.accepted.border}`, color: STATUS_COLOR.accepted.text, backgroundColor: "transparent", cursor: "pointer", fontSize: "0.78rem", fontWeight: 600 }}>
+                  ✓ Aceptar
+                </button>
+                <button
+                  onClick={() => { setEditText(sugg.correctedText); setEditJustification(""); setEditingId(sugg.id); }}
+                  style={{ flex: 1, padding: "0.4rem", borderRadius: "var(--radius-sm)", border: `1px solid ${STATUS_COLOR.edited.border}`, color: STATUS_COLOR.edited.text, backgroundColor: "transparent", cursor: "pointer", fontSize: "0.78rem", fontWeight: 600 }}>
+                  ✎ Editar
+                </button>
+                <button className="btn-action reject" onClick={() => handleReject(sugg.id)} style={{ flex: 1, padding: "0.4rem", borderRadius: "var(--radius-sm)", border: `1px solid ${STATUS_COLOR.rejected.border}`, color: STATUS_COLOR.rejected.text, backgroundColor: "transparent", cursor: "pointer", fontSize: "0.78rem", fontWeight: 600 }}>
+                  ✕ Rechazar
+                </button>
+              </div>
+            ) : sugg.status !== "pending" ? (
+              <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.78rem" }}>
+                {sugg.status === "accepted"
+                  ? <><CheckCircle2 size={13} style={{ color: STATUS_COLOR.accepted.text }} /><span style={{ color: STATUS_COLOR.accepted.text }}>Aceptada</span></>
+                  : sugg.status === "rejected"
+                  ? <><XCircle size={13} style={{ color: STATUS_COLOR.rejected.text }} /><span style={{ color: STATUS_COLOR.rejected.text }}>Rechazada</span></>
+                  : <span style={{ color: STATUS_COLOR.edited.text }}>✎ Editada — pendiente de aprobación</span>}
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+    );
   };
 
   // ── Selected correction detail ────────────────────────────────────────
@@ -650,142 +836,57 @@ export default function EditorPage() {
               </div>
             )}
 
-            {filteredSuggestions.map((sugg, idx) => {
-              const col = STATUS_COLOR[sugg.status];
-              const isSelected = selectedId === sugg.id;
-              const isEditing = editingId === sugg.id;
-              const globalIdx = allSuggestions.findIndex(s => s.id === sugg.id);
-
-              return (
-                <div
-                  key={sugg.id}
-                  id={`panel-card-${sugg.id}`}
-                  style={{
-                    margin: "0 0.75rem 0.5rem",
-                    borderRadius: "var(--radius-md)",
-                    border: `1px solid ${isSelected ? col.border : "var(--border-color)"}`,
-                    backgroundColor: isSelected ? col.bg : "var(--bg-color)",
-                    transition: "all 0.15s",
-                    overflow: "hidden",
-                  }}
+            {/* Collapse-all toggle — only when chapters are detected */}
+            {chapterGroups.length > 1 && filteredSuggestions.length > 0 && (
+              <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 0.75rem 0.4rem", gap: "0.4rem" }}>
+                <button
+                  onClick={toggleAllChapters}
+                  style={{ fontSize: "0.65rem", fontWeight: 700, color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer", letterSpacing: "0.03em", padding: "0.1rem 0.3rem", borderRadius: "4px" }}
                 >
-                  {/* Card header */}
-                  <div
-                    onClick={() => isSelected ? setSelectedId(null) : handleSelectCorrection(sugg.id)}
-                    style={{
-                      padding: "0.625rem 0.875rem",
-                      cursor: "pointer",
-                      display: "flex", alignItems: "flex-start", gap: "0.5rem",
-                    }}
-                  >
-                    {/* Number badge */}
-                    <span style={{
-                      flexShrink: 0, width: "20px", height: "20px", borderRadius: "50%",
-                      backgroundColor: col.border, color: "#fff",
-                      fontSize: "0.65rem", fontWeight: 800,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      marginTop: "2px",
-                    }}>
-                      {globalIdx + 1}
-                    </span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.25rem" }}>
-                        <span style={{ fontSize: "0.65rem", fontWeight: 700, color: col.text, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                          {sugg.category ?? "Ortografía"}
+                  {allCollapsed ? "▶ Expandir todo" : "▼ Colapsar todo"}
+                </button>
+              </div>
+            )}
+
+            {/* Grouped by chapter (or flat if no chapters detected) */}
+            {chapterGroups.length <= 1
+              ? filteredSuggestions.map((sugg) => renderCorrectionCard(sugg))
+              : chapterGroups.map(chapter => {
+                  const chapterSuggs = filteredSuggestions.filter(s => chapter.chunkIds.has(s.chunkId));
+                  if (chapterSuggs.length === 0) return null;
+                  const isCollapsed = collapsedChapters.has(chapter.id);
+                  const pendingInChapter = chapterSuggs.filter(s => s.status === "pending").length;
+                  return (
+                    <div key={chapter.id} style={{ marginBottom: "0.25rem" }}>
+                      {/* Chapter header */}
+                      <div
+                        onClick={() => toggleChapter(chapter.id)}
+                        style={{
+                          display: "flex", alignItems: "center", gap: "0.4rem",
+                          padding: "0.45rem 0.75rem",
+                          cursor: "pointer",
+                          backgroundColor: "var(--bg-surface)",
+                          borderTop: "1px solid var(--border-color)",
+                          borderBottom: isCollapsed ? "1px solid var(--border-color)" : "none",
+                          userSelect: "none",
+                        }}
+                      >
+                        <span style={{ fontSize: "0.6rem", color: "var(--text-muted)", flexShrink: 0, transition: "transform 0.15s", display: "inline-block", transform: isCollapsed ? "rotate(-90deg)" : "rotate(0)" }}>▼</span>
+                        <span style={{ flex: 1, fontSize: "0.7rem", fontWeight: 700, color: "var(--text-main)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {chapter.title}
                         </span>
-                        <span style={{ fontSize: "0.6rem", color: "var(--text-muted)", fontStyle: "italic" }}>
-                          {sugg.status === "pending" ? "Pendiente" : sugg.status === "accepted" ? "✓ Aceptada" : sugg.status === "rejected" ? "✕ Rechazada" : "✎ Editada (pendiente)"}
+                        <span style={{ fontSize: "0.6rem", fontWeight: 700, color: "var(--primary)", backgroundColor: "rgba(99,102,241,0.1)", borderRadius: "99px", padding: "0.05rem 0.4rem", flexShrink: 0 }}>
+                          {pendingInChapter > 0 ? `${pendingInChapter} pend.` : `${chapterSuggs.length} ✓`}
                         </span>
                       </div>
-                      {/* Diff */}
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", flexWrap: "wrap", fontFamily: "monospace", fontSize: "0.8rem" }}>
-                        <span style={{ textDecoration: "line-through", color: STATUS_COLOR.pending.text, backgroundColor: "rgba(239,68,68,0.08)", padding: "0 4px", borderRadius: "3px" }}>
-                          {sugg.originalText.length > 30 ? sugg.originalText.slice(0, 30) + "…" : sugg.originalText}
-                        </span>
-                        <span style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>→</span>
-                        <span style={{ color: STATUS_COLOR.accepted.text, backgroundColor: "rgba(16,185,129,0.08)", padding: "0 4px", borderRadius: "3px" }}>
-                          {sugg.correctedText.length > 30 ? sugg.correctedText.slice(0, 30) + "…" : sugg.correctedText}
-                        </span>
-                      </div>
+                      {/* Corrections in this chapter */}
+                      {!isCollapsed && chapterSuggs.map(sugg => renderCorrectionCard(sugg))}
                     </div>
-                  </div>
-
-                  {/* Expanded detail */}
-                  {isSelected && (
-                    <div style={{ borderTop: "1px solid var(--border-color)", padding: "0.75rem 0.875rem", backgroundColor: "var(--bg-surface)" }}>
-                      <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontStyle: "italic", marginBottom: "0.75rem", lineHeight: 1.5 }}>
-                        {sugg.justification}
-                      </p>
-                      {sugg.editorJustification && (
-                        <p style={{ fontSize: "0.78rem", color: STATUS_COLOR.edited.text, marginBottom: "0.75rem", lineHeight: 1.5 }}>
-                          ✎ Nota del editor: {sugg.editorJustification}
-                        </p>
-                      )}
-
-                      {/* Edit form */}
-                      {isEditing ? (
-                        <div>
-                          <label style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--text-muted)", display: "block", marginBottom: "0.25rem" }}>
-                            Corrección editada
-                          </label>
-                          <input
-                            className="input"
-                            style={{ marginBottom: "0.5rem", fontSize: "0.875rem" }}
-                            value={editText}
-                            onChange={e => setEditText(e.target.value)}
-                            autoFocus
-                          />
-                          <label style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--text-muted)", display: "block", marginBottom: "0.25rem" }}>
-                            Justificación del editor *
-                          </label>
-                          <textarea
-                            className="input"
-                            rows={2}
-                            style={{ marginBottom: "0.75rem", fontSize: "0.8rem", resize: "vertical" }}
-                            placeholder="Explica por qué realizas este cambio…"
-                            value={editJustification}
-                            onChange={e => setEditJustification(e.target.value)}
-                          />
-                          <div style={{ display: "flex", gap: "0.4rem" }}>
-                            <button className="btn" style={{ flex: 1, padding: "0.35rem", fontSize: "0.78rem" }}
-                              onClick={() => handleSaveEdit(sugg.id)}>
-                              Guardar ✓
-                            </button>
-                            <button className="btn btn-secondary" style={{ flex: 1, padding: "0.35rem", fontSize: "0.78rem" }}
-                              onClick={() => setEditingId(null)}>
-                              Cancelar
-                            </button>
-                          </div>
-                        </div>
-                      ) : canManage() && sugg.status === "pending" ? (
-                        <div style={{ display: "flex", gap: "0.4rem" }}>
-                          <button className="btn-action accept" onClick={() => handleAccept(sugg.id)} style={{ flex: 1, padding: "0.4rem", borderRadius: "var(--radius-sm)", border: `1px solid ${STATUS_COLOR.accepted.border}`, color: STATUS_COLOR.accepted.text, backgroundColor: "transparent", cursor: "pointer", fontSize: "0.78rem", fontWeight: 600 }}>
-                            ✓ Aceptar
-                          </button>
-                          <button
-                            onClick={() => { setEditText(sugg.correctedText); setEditJustification(""); setEditingId(sugg.id); }}
-                            style={{ flex: 1, padding: "0.4rem", borderRadius: "var(--radius-sm)", border: `1px solid ${STATUS_COLOR.edited.border}`, color: STATUS_COLOR.edited.text, backgroundColor: "transparent", cursor: "pointer", fontSize: "0.78rem", fontWeight: 600 }}>
-                            ✎ Editar
-                          </button>
-                          <button className="btn-action reject" onClick={() => handleReject(sugg.id)} style={{ flex: 1, padding: "0.4rem", borderRadius: "var(--radius-sm)", border: `1px solid ${STATUS_COLOR.rejected.border}`, color: STATUS_COLOR.rejected.text, backgroundColor: "transparent", cursor: "pointer", fontSize: "0.78rem", fontWeight: 600 }}>
-                            ✕ Rechazar
-                          </button>
-                        </div>
-                      ) : sugg.status !== "pending" ? (
-                        <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.78rem" }}>
-                          {sugg.status === "accepted"
-                            ? <><CheckCircle2 size={13} style={{ color: STATUS_COLOR.accepted.text }} /><span style={{ color: STATUS_COLOR.accepted.text }}>Aceptada</span></>
-                            : sugg.status === "rejected"
-                            ? <><XCircle size={13} style={{ color: STATUS_COLOR.rejected.text }} /><span style={{ color: STATUS_COLOR.rejected.text }}>Rechazada</span></>
-                            : <span style={{ color: STATUS_COLOR.edited.text }}>✎ Editada — pendiente de aprobación</span>}
-                        </div>
-                      ) : null}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                  );
+                })
+            }
           </div>
+
 
           {/* Legend */}
           <div style={{ padding: "0.75rem 1.25rem", borderTop: "1px solid var(--border-color)", display: "flex", gap: "1rem", fontSize: "0.65rem", fontWeight: 600, flexShrink: 0 }}>

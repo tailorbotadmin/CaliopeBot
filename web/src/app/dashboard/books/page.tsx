@@ -640,7 +640,7 @@ export default function BooksPage() {
           {/* List header */}
           <div style={{
             display: "grid",
-            gridTemplateColumns: "minmax(80px,0.8fr) minmax(90px,0.9fr) 52px minmax(130px,1.1fr) 125px 80px minmax(170px,auto)",
+            gridTemplateColumns: "minmax(80px,0.8fr) minmax(90px,0.9fr) 52px minmax(130px,1.1fr) 125px 90px minmax(170px,auto)",
             gap: "0 0.5rem",
             padding: "0.625rem 1.25rem",
             borderBottom: "1px solid var(--border-color)",
@@ -662,7 +662,7 @@ export default function BooksPage() {
           {books.map((book, idx) => {
             const sc = STATUS_CONFIG[book.status] ?? STATUS_CONFIG.draft;
             const dateStr = book.createdAt?.toDate
-              ? book.createdAt.toDate().toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" })
+              ? book.createdAt.toDate().toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "2-digit" })
               : "—";
             const isLast = idx === books.length - 1;
             const canDownload = ["review_editor", "review_author", "review_responsable", "approved"].includes(book.status);
@@ -771,7 +771,7 @@ export default function BooksPage() {
                 </div>
 
                 {/* Date */}
-                <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "0.3rem" }}>
+                <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "0.3rem", whiteSpace: "nowrap" }}>
                   <Clock size={11} />{dateStr}
                 </div>
 

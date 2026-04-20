@@ -12,10 +12,62 @@ env:
   AR_REPO: caliopebot
   AI_WORKER_SERVICE: caliopebot-ai-worker
   WEB_SERVICE: caliopebot-web
+  LT_SERVICE: caliopebot-languagetool
 
 jobs:
+  deploy-languagetool:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      lt_url: ${{ steps.get_lt_url.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy LanguageTool to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.LT_SERVICE }} \
+            --image docker.io/erikvl87/languagetool:latest \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --memory 2Gi \
+            --cpu 2 \
+            --min-instances 0 \
+            --max-instances 3 \
+            --timeout 60 \
+            --port 8010 \
+            --set-env-vars "Java_Xms=512m,Java_Xmx=1536m" \
+            --allow-unauthenticated
+
+      - name: Make LanguageTool publicly accessible (IAM)
+        continue-on-error: true
+        run: |
+          gcloud run services add-iam-policy-binding ${{ env.LT_SERVICE }} \
+            --region ${{ env.REGION }} \
+            --member="allUsers" \
+            --role="roles/run.invoker" && echo "✅ LT IAM binding applied" || echo "⚠️ LT IAM binding skipped"
+
+      - name: Get LanguageTool URL
+        id: get_lt_url
+        run: |
+          URL=$(gcloud run services describe ${{ env.LT_SERVICE }} \
+            --region ${{ env.REGION }} \
+            --format 'value(status.url)')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "✅ LanguageTool URL: $URL"
+
   deploy-ai-worker:
     runs-on: ubuntu-latest
+    needs: deploy-languagetool
     permissions:
       contents: read
       id-token: write
@@ -44,6 +96,7 @@ jobs:
 
       - name: Deploy ai-worker to Cloud Run
         run: |
+          LT_URL="${{ needs.deploy-languagetool.outputs.lt_url }}"
           gcloud run deploy ${{ env.AI_WORKER_SERVICE }} \
             --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.AI_WORKER_SERVICE }}:${{ github.sha }} \
             --region ${{ env.REGION }} \
@@ -53,7 +106,7 @@ jobs:
             --min-instances 1 \
             --max-instances 10 \
             --timeout 300 \
-            --set-env-vars "ENVIRONMENT=production,GCP_PROJECT_ID=${{ env.PROJECT_ID }},GCP_LOCATION=${{ env.LLM_LOCATION }},VERTEX_API_KEY=${{ secrets.VERTEX_API_KEY }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" \
+            --set-env-vars "ENVIRONMENT=production,GCP_PROJECT_ID=${{ env.PROJECT_ID }},GCP_LOCATION=${{ env.LLM_LOCATION }},VERTEX_API_KEY=${{ secrets.VERTEX_API_KEY }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},LANGUAGETOOL_URL=${LT_URL}" \
             --allow-unauthenticated
 
       - name: Make ai-worker publicly accessible (IAM)

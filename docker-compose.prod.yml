@@ -1,6 +1,22 @@
 version: "3.9"
 
 services:
+  languagetool:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1"
+    environment:
+      - Java_Xms=256m
+      - Java_Xmx=768m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/v2/languages"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
   chromadb:
     restart: always
     deploy:

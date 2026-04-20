@@ -1,6 +1,21 @@
 version: "3.9"
 
 services:
+  languagetool:
+    image: erikvl87/languagetool
+    ports:
+      - "8010:8010"
+    environment:
+      - Java_Xms=256m
+      - Java_Xmx=512m
+    networks:
+      - caliope
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/v2/languages"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
   chromadb:
     image: chromadb/chroma:latest
     ports:
@@ -18,10 +33,13 @@ services:
       - "8000:8000"
     env_file:
       - ./ai-worker/.env
+    environment:
+      - LANGUAGETOOL_URL=http://languagetool:8010
     volumes:
       - ./ai-worker:/app  # Live reload in dev
     depends_on:
       - chromadb
+      - languagetool
     networks:
       - caliope
 

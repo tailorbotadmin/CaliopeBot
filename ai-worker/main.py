@@ -124,20 +124,68 @@ from app.services.metrics import (
 )
 
 # ==========================================
-# LANGUAGETOOL
+# LANGUAGETOOL — self-hosted or public API
 # ==========================================
 import language_tool_python
+
 class MockTool:
     def check(self, text):
         return []
 
-try:
-    # es-ES = español peninsular, normativa RAE
-    tool = language_tool_python.LanguageToolPublicAPI('es-ES')
-    logger.info("LanguageTool initialized: es-ES (RAE)")
-except Exception as e:
-    logger.warning(f"Failed to initialize LanguageTool, using mock: {e}")
-    tool = MockTool()
+# Detect if we have a self-hosted LT instance
+_LT_HOST = os.environ.get("LANGUAGETOOL_URL", "").rstrip("/")
+_LT_IS_SELFHOSTED = bool(_LT_HOST and _LT_HOST != "https://api.languagetool.org")
+
+# Cache of initialized LanguageTool instances per language code
+_lt_tools: dict = {}
+
+def get_lt_tool(lang: str = "es-ES"):
+    """Return a cached LanguageTool instance for the given language.
+    Uses self-hosted server if LANGUAGETOOL_URL is set, otherwise falls back
+    to the public API. Instances are cached per language code.
+    """
+    if lang in _lt_tools:
+        return _lt_tools[lang]
+
+    try:
+        if _LT_IS_SELFHOSTED:
+            logger.info(f"LanguageTool: connecting to self-hosted server at {_LT_HOST} for lang={lang}")
+            # language_tool_python supports remote_server parameter
+            lt = language_tool_python.LanguageTool(lang, remote_server=_LT_HOST)
+        else:
+            logger.info(f"LanguageTool: using public API for lang={lang}")
+            lt = language_tool_python.LanguageToolPublicAPI(lang)
+        _lt_tools[lang] = lt
+        logger.info(f"LanguageTool initialized: {lang} ({'self-hosted' if _LT_IS_SELFHOSTED else 'public API'})")
+        return lt
+    except Exception as e:
+        logger.warning(f"LanguageTool init failed for lang={lang}: {e} — using mock")
+        mock = MockTool()
+        _lt_tools[lang] = mock
+        return mock
+
+# Pre-warm the default languages at startup
+tool = get_lt_tool("es-ES")   # Spanish (RAE)
+_     = get_lt_tool("ca")     # Catalan (IEC) — pre-warmed so first book doesn't wait
+
+# Language configs: maps language code to normative body label
+LANG_META = {
+    "es":    {"lt_code": "es-ES", "normativa": "RAE",    "nombre": "Español (castellano)"},
+    "es-ES": {"lt_code": "es-ES", "normativa": "RAE",    "nombre": "Español (España)"},
+    "ca":    {"lt_code": "ca",    "normativa": "IEC",    "nombre": "Català"},
+    "ca-ES": {"lt_code": "ca",    "normativa": "IEC",    "nombre": "Català (España)"},
+    "en":    {"lt_code": "en-GB", "normativa": "Style",  "nombre": "English"},
+    "en-GB": {"lt_code": "en-GB", "normativa": "Style",  "nombre": "English (UK)"},
+    "en-US": {"lt_code": "en-US", "normativa": "Style",  "nombre": "English (US)"},
+}
+
+def resolve_lt_code(lang: str) -> str:
+    """Normalize any language tag to the best LanguageTool code."""
+    if not lang:
+        return "es-ES"
+    entry = LANG_META.get(lang) or LANG_META.get(lang.split("-")[0])
+    return entry["lt_code"] if entry else lang
+
 
 # ==========================================
 # RAG BOOTSTRAP — load editorial criteria
@@ -238,6 +286,7 @@ class IngestRequest(BaseModel):
     organizationId: str
     fileUrl: str
     authorId: str
+    language: str = "es"   # BCP 47: "es", "ca", "en", "en-GB" ...
 
 class ExtractRulesRequest(BaseModel):
     organizationId: str
@@ -395,6 +444,14 @@ async def process_book_background(org_id: str, book_id: str, author_id: str):
         else:
             logger.info(f"Reusing existing voice profile for book={book_id}")
 
+        # ── Resolve LanguageTool for this book's language ──────────────────────
+        book_snap_data = book_ref.get().to_dict() or {}
+        book_lang = book_snap_data.get("language", "es")
+        lt_code = resolve_lt_code(book_lang)
+        lt_tool = get_lt_tool(lt_code)
+        lang_meta = LANG_META.get(book_lang) or LANG_META.get(book_lang.split("-")[0]) or {"normativa": "RAE", "nombre": book_lang}
+        logger.info(f"[book={book_id}] Language: {book_lang} → LT code: {lt_code} ({lang_meta['normativa']})")
+
         # ── Step 1: Collect pending chunks ────────────────────────────────────
         all_chunks = list(chunks_ref.order_by("order").stream())
         pending = [c for c in all_chunks if c.to_dict().get("status") == "pending"]
@@ -412,10 +469,10 @@ async def process_book_background(org_id: str, book_id: str, author_id: str):
 
             # Per-chunk try/except: one bad chunk must NOT kill the whole book
             try:
-                # ── LanguageTool (deterministic RAE) — 15s timeout ────────────
+                # ── LanguageTool (deterministic) — 15s timeout ────────────────
                 try:
                     with ThreadPoolExecutor(max_workers=1) as _lt_exec:
-                        _lt_future = _lt_exec.submit(tool.check, text)
+                        _lt_future = _lt_exec.submit(lt_tool.check, text)
                         lt_matches = _lt_future.result(timeout=15)
                 except (FuturesTimeoutError, Exception) as lt_err:
                     logger.warning(f"[book={book_id} chunk={chunk.id}] LanguageTool skipped: {lt_err}")
@@ -761,7 +818,9 @@ async def ingest_book(request: IngestRequest, background_tasks: BackgroundTasks)
             "totalChunks": len(all_chunks),
             "processedChunks": 0,
             "totalPages": current_page,
+            "language": request.language or "es",
         })
+
 
         background_tasks.add_task(
             process_book_background, request.organizationId, request.bookId, request.authorId

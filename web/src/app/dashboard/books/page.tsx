@@ -50,6 +50,7 @@ export default function BooksPage() {
   const [selectedOrgId, setSelectedOrgId] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [selectedLanguage, setSelectedLanguage] = useState("es");
 
   // Author selection in modal
   const [selectedAuthorId, setSelectedAuthorId] = useState("");
@@ -267,14 +268,14 @@ export default function BooksPage() {
   };
 
   // ---- Trigger AI Worker ----
-  const triggerIngestion = async (bookId: string, orgId: string, fileUrl: string, authorId: string): Promise<boolean> => {
+  const triggerIngestion = async (bookId: string, orgId: string, fileUrl: string, authorId: string, language = "es"): Promise<boolean> => {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000);
       const res = await fetch(`${API_URL}/api/v1/ingest-book`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bookId, organizationId: orgId, fileUrl, authorId }),
+        body: JSON.stringify({ bookId, organizationId: orgId, fileUrl, authorId, language }),
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
@@ -443,7 +444,7 @@ export default function BooksPage() {
             [...orgAuthors, ...orgEditors].find(u => u.uid === effectiveAuthorId)?.displayName
               ?? (effectiveAuthorId === user!.uid ? (user!.displayName ?? user!.email ?? "") : "")
           );
-          const ok = await triggerIngestion(createdBookId, selectedOrgId, downloadURL, effectiveAuthorId);
+          const ok = await triggerIngestion(createdBookId, selectedOrgId, downloadURL, effectiveAuthorId, selectedLanguage);
           if (ok) {
             await updateBookStatus(selectedOrgId, createdBookId, "processing");
             // Notify Responsables Editoriales
@@ -893,6 +894,48 @@ export default function BooksPage() {
                   placeholder="Ej. Cien años de soledad"
                   required
                 />
+              </div>
+
+              {/* Language selector */}
+              <div style={{ marginBottom: "1.125rem" }}>
+                <label style={{ display: "block", marginBottom: "0.375rem", fontWeight: 600, color: "var(--text-main)", fontSize: "0.875rem" }}>
+                  Idioma del manuscrito
+                </label>
+                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  {[
+                    { code: "es",    label: "Español",  flag: "🇪🇸", norm: "RAE" },
+                    { code: "ca",    label: "Català",   flag: "🏴", norm: "IEC" },
+                    { code: "en-GB", label: "English",  flag: "🇬🇧", norm: "Style" },
+                  ].map(lang => (
+                    <button
+                      key={lang.code}
+                      type="button"
+                      onClick={() => setSelectedLanguage(lang.code)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: "0.4rem",
+                        padding: "0.4rem 0.75rem", borderRadius: "var(--radius)",
+                        border: "1px solid",
+                        borderColor: selectedLanguage === lang.code ? "var(--primary)" : "var(--border-color)",
+                        backgroundColor: selectedLanguage === lang.code ? "rgba(99,102,241,0.1)" : "transparent",
+                        color: selectedLanguage === lang.code ? "var(--primary)" : "var(--text-muted)",
+                        fontWeight: selectedLanguage === lang.code ? 700 : 400,
+                        fontSize: "0.825rem", cursor: "pointer", transition: "all 0.15s",
+                      }}
+                    >
+                      <span style={{ fontSize: "1rem" }}>{lang.flag}</span>
+                      {lang.label}
+                      <span style={{
+                        fontSize: "0.6rem", padding: "0.05rem 0.35rem", borderRadius: "99px",
+                        backgroundColor: selectedLanguage === lang.code ? "rgba(99,102,241,0.2)" : "var(--border-color)",
+                        color: selectedLanguage === lang.code ? "var(--primary)" : "var(--text-muted)",
+                        fontWeight: 800,
+                      }}>{lang.norm}</span>
+                    </button>
+                  ))}
+                </div>
+                <p style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: "0.35rem" }}>
+                  Determina las reglas normativas y el corrector gramatical utilizados por la IA.
+                </p>
               </div>
 
               {/* Author field */}

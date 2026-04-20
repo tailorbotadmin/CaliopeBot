@@ -637,10 +637,10 @@ export default function BooksPage() {
           <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
           {/* Table — 7 columns */}
           <div style={{ minWidth: "960px" }}>
-          {/* List header */}
+          {/* List header — Manuscrito | Idioma | Autor | Editor | Estado | Fecha | Acciones */}
           <div style={{
             display: "grid",
-            gridTemplateColumns: "minmax(80px,0.8fr) minmax(90px,0.9fr) 52px minmax(130px,1.1fr) 125px 90px minmax(170px,auto)",
+            gridTemplateColumns: "minmax(80px,0.8fr) 52px minmax(90px,0.9fr) minmax(130px,1.1fr) 125px 105px minmax(170px,auto)",
             gap: "0 0.5rem",
             padding: "0.625rem 1.25rem",
             borderBottom: "1px solid var(--border-color)",
@@ -651,8 +651,8 @@ export default function BooksPage() {
             color: "var(--text-muted)",
           }}>
             <span>Manuscrito</span>
-            <span>Autor</span>
             <span>Idioma</span>
+            <span>Autor</span>
             <span>Editor asignado</span>
             <span>Estado</span>
             <span>Fecha</span>
@@ -671,8 +671,7 @@ export default function BooksPage() {
                 key={book.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "minmax(80px,0.8fr) minmax(90px,0.9fr) 52px minmax(130px,1.1fr) 125px 80px minmax(170px,auto)",
-
+                  gridTemplateColumns: "minmax(80px,0.8fr) 52px minmax(90px,0.9fr) minmax(130px,1.1fr) 125px 105px minmax(170px,auto)",
                   gap: "0 0.5rem",
                   padding: "0.875rem 1.25rem",
                   alignItems: "center",
@@ -701,17 +700,7 @@ export default function BooksPage() {
                   )}
                 </div>
 
-                {/* Autor */}
-                <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "0.25rem", overflow: "hidden" }}>
-                  <UserCircle2 size={12} style={{ flexShrink: 0 }} />
-                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {book.authorName
-                      ?? [...orgAuthors, ...orgEditors].find(u => u.uid === book.authorId)?.displayName
-                      ?? (book.authorId === user?.uid ? (user?.displayName ?? user?.email?.split("@")[0] ?? "Yo") : "Autor")}
-                  </span>
-                </div>
-
-                {/* Idioma — flag */}
+                {/* Idioma — flag (2nd column) */}
                 {(() => {
                   const lang = LANG_FLAG[book.language ?? "es"] ?? LANG_FLAG["es"];
                   return (
@@ -720,6 +709,16 @@ export default function BooksPage() {
                     </div>
                   );
                 })()}
+
+                {/* Autor (3rd column) */}
+                <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "0.25rem", overflow: "hidden" }}>
+                  <UserCircle2 size={12} style={{ flexShrink: 0 }} />
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {book.authorName
+                      ?? [...orgAuthors, ...orgEditors].find(u => u.uid === book.authorId)?.displayName
+                      ?? (book.authorId === user?.uid ? (user?.displayName ?? user?.email?.split("@")[0] ?? "Yo") : "Autor")}
+                  </span>
+                </div>
 
                 {/* Editor asignado column — dropdown for admins, label for others */}
                 <div style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>

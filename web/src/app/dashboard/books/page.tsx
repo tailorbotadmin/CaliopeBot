@@ -618,11 +618,11 @@ export default function BooksPage() {
           <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
           {/* Table — min-width ensures columns never collapse */}
           <div style={{ minWidth: "820px" }}>
-          {/* List header */}
+          {/* List header — 5 columns (title+author merged) */}
           <div style={{
             display: "grid",
-            gridTemplateColumns: "minmax(160px,1.5fr) minmax(100px,0.8fr) minmax(130px,1fr) 130px 85px minmax(160px,auto)",
-            gap: "0 0.5rem",
+            gridTemplateColumns: "minmax(200px,2fr) minmax(150px,1.2fr) 135px 90px minmax(170px,auto)",
+            gap: "0 0.75rem",
             padding: "0.625rem 1.25rem",
             borderBottom: "1px solid var(--border-color)",
             fontSize: "0.7rem",
@@ -631,8 +631,7 @@ export default function BooksPage() {
             letterSpacing: "0.05em",
             color: "var(--text-muted)",
           }}>
-            <span>Manuscrito</span>
-            <span>Autor</span>
+            <span>Manuscrito / Autor</span>
             <span>Editor asignado</span>
             <span>Estado</span>
             <span>Fecha</span>
@@ -651,8 +650,8 @@ export default function BooksPage() {
                 key={book.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "minmax(160px,1.5fr) minmax(100px,0.8fr) minmax(130px,1fr) 130px 85px minmax(160px,auto)",
-                  gap: "0 0.5rem",
+                  gridTemplateColumns: "minmax(200px,2fr) minmax(150px,1.2fr) 135px 90px minmax(170px,auto)",
+                  gap: "0 0.75rem",
                   padding: "0.875rem 1.25rem",
                   alignItems: "center",
                   borderBottom: isLast ? "none" : "1px solid var(--border-color)",
@@ -662,32 +661,31 @@ export default function BooksPage() {
                 onMouseEnter={e => (e.currentTarget.style.background = "var(--bg-color)")}
                 onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
               >
-                {/* Title + filename */}
+                {/* Title + author + filename in one compact cell */}
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.2rem" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.15rem" }}>
                     <FileText size={15} style={{ color: "var(--primary)", flexShrink: 0 }} />
                     <span style={{ fontWeight: 700, fontSize: "0.9375rem", color: "var(--text-main)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                       {book.title}
                     </span>
                   </div>
+                  {/* Author as sub-line — right under the title */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.25rem", paddingLeft: "1.4rem" }}>
+                    <UserCircle2 size={11} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                    <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {book.authorName
+                        ?? [...orgAuthors, ...orgEditors].find(u => u.uid === book.authorId)?.displayName
+                        ?? (book.authorId === user?.uid ? (user?.displayName ?? user?.email ?? "Yo") : "Autor")}
+                    </span>
+                  </div>
                   {book.fileName && (
-                    <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", paddingLeft: "1.4rem" }}>{book.fileName}</span>
+                    <span style={{ fontSize: "0.68rem", color: "var(--text-muted)", paddingLeft: "1.4rem", opacity: 0.7 }}>{book.fileName}</span>
                   )}
                   {book.status === "error" && (
-                    <p style={{ fontSize: "0.68rem", color: "#ef4444", marginTop: "0.25rem", paddingLeft: "1.4rem" }}>
+                    <p style={{ fontSize: "0.68rem", color: "#ef4444", marginTop: "0.2rem", paddingLeft: "1.4rem" }}>
                       Error en la edición — usa Reintentar
                     </p>
                   )}
-                </div>
-
-                {/* Autor column */}
-                <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "0.3rem", overflow: "hidden" }}>
-                  <UserCircle2 size={12} style={{ flexShrink: 0 }} />
-                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {book.authorName
-                      ?? [...orgAuthors, ...orgEditors].find(u => u.uid === book.authorId)?.displayName
-                      ?? (book.authorId === user?.uid ? (user?.displayName ?? user?.email ?? "Yo") : "Autor")}
-                  </span>
                 </div>
 
                 {/* Editor asignado column — dropdown for admins, label for others */}

@@ -213,7 +213,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </aside>
 
         {/* ── MAIN CONTENT ── */}
-        <main style={{ flex: 1, backgroundColor: "var(--bg-color)", overflowY: "auto" }}>
+        <main style={{ flex: 1, backgroundColor: "var(--bg-color)", overflow: "visible", minWidth: 0 }}>
           {children}
         </main>
       </div>

@@ -237,10 +237,12 @@ export default function EditorPage() {
     const list: (Suggestion & { chunkId: string; chunkOrder: number })[] = [];
     chunks.forEach(chunk => {
       (chunk.suggestions ?? []).forEach(s => {
-        // Skip hallucinations: originalText must exist in chunk and differ from correctedText
+        // Only skip if originalText is missing or is a no-op (same as correctedText).
+        // The text-inclusion check ran server-side before persisting; re-running it here
+        // falsely drops corrections when the same phrase appears multiple times in a chunk
+        // or when there are subtle encoding differences between stored and live text.
         if (!s.originalText) return;
         if (s.originalText === s.correctedText) return;
-        if (!(chunk.text ?? "").includes(s.originalText)) return;
         list.push({ ...s, chunkId: chunk.id, chunkOrder: chunk.order });
       });
     });

@@ -640,7 +640,7 @@ export default function BooksPage() {
           {/* List header */}
           <div style={{
             display: "grid",
-            gridTemplateColumns: "minmax(160px,2fr) minmax(90px,0.9fr) 52px minmax(130px,1.1fr) 125px 80px minmax(170px,auto)",
+            gridTemplateColumns: "minmax(120px,1.2fr) minmax(90px,0.9fr) 52px minmax(130px,1.1fr) 125px 80px minmax(170px,auto)",
             gap: "0 0.5rem",
             padding: "0.625rem 1.25rem",
             borderBottom: "1px solid var(--border-color)",
@@ -671,7 +671,8 @@ export default function BooksPage() {
                 key={book.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "minmax(160px,2fr) minmax(90px,0.9fr) 52px minmax(130px,1.1fr) 125px 80px minmax(170px,auto)",
+                  gridTemplateColumns: "minmax(120px,1.2fr) minmax(90px,0.9fr) 52px minmax(130px,1.1fr) 125px 80px minmax(170px,auto)",
+
                   gap: "0 0.5rem",
                   padding: "0.875rem 1.25rem",
                   alignItems: "center",

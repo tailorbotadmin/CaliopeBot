@@ -42,8 +42,8 @@ const LANG_FLAG: Record<string, { flag: string; label: string }> = {
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
   draft:               { label: "Borrador",           color: "var(--text-muted)",  bg: "var(--border-color)" },
   processing:          { label: "Analizando…",         color: "#f59e0b",            bg: "rgba(245,158,11,0.12)" },
-  review_editor:       { label: "Revisión Editor",     color: "#6366f1",            bg: "rgba(99,102,241,0.12)" },
-  ready:               { label: "Revisión Editor",     color: "#6366f1",            bg: "rgba(99,102,241,0.12)" },
+  review_editor:       { label: "En edición",         color: "#6366f1",            bg: "rgba(99,102,241,0.12)" },
+  ready:               { label: "En edición",         color: "#6366f1",            bg: "rgba(99,102,241,0.12)" },
   review_author:       { label: "Revisión Autor",      color: "#06b6d4",            bg: "rgba(6,182,212,0.12)" },
   review_responsable:  { label: "Aprobación Final",    color: "#a855f7",            bg: "rgba(168,85,247,0.12)" },
   approved:            { label: "Aprobado",            color: "var(--success)",     bg: "rgba(16,185,129,0.12)" },
@@ -640,7 +640,7 @@ export default function BooksPage() {
           {/* List header */}
           <div style={{
             display: "grid",
-            gridTemplateColumns: "minmax(120px,1.2fr) minmax(90px,0.9fr) 52px minmax(130px,1.1fr) 125px 80px minmax(170px,auto)",
+            gridTemplateColumns: "minmax(80px,0.8fr) minmax(90px,0.9fr) 52px minmax(130px,1.1fr) 125px 80px minmax(170px,auto)",
             gap: "0 0.5rem",
             padding: "0.625rem 1.25rem",
             borderBottom: "1px solid var(--border-color)",
@@ -671,7 +671,7 @@ export default function BooksPage() {
                 key={book.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "minmax(120px,1.2fr) minmax(90px,0.9fr) 52px minmax(130px,1.1fr) 125px 80px minmax(170px,auto)",
+                  gridTemplateColumns: "minmax(80px,0.8fr) minmax(90px,0.9fr) 52px minmax(130px,1.1fr) 125px 80px minmax(170px,auto)",
 
                   gap: "0 0.5rem",
                   padding: "0.875rem 1.25rem",

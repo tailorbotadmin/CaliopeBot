@@ -292,6 +292,10 @@ export default function BooksPage() {
   };
 
   // ---- Assign corrector (editor) to a book ----
+  // Helper: best display name for an editor — never shows a raw email
+  const editorLabel = (e: { displayName?: string | null; email: string }) =>
+    e.displayName?.trim() || e.email.split("@")[0];
+
   const handleAssignEditor = async (book: Book, editorId: string) => {
     if (!selectedOrgId) return;
     setAssigningId(book.id);
@@ -301,11 +305,11 @@ export default function BooksPage() {
         selectedOrgId,
         book.id,
         editor ? editor.uid : null,
-        editor ? (editor.displayName ?? editor.email) : null,
+        editor ? editorLabel(editor) : null,
       );
       setBooks(prev => prev.map(b =>
         b.id === book.id
-          ? { ...b, assignedEditorId: editor?.uid ?? undefined, assignedEditorName: editor ? (editor.displayName ?? editor.email) : undefined }
+          ? { ...b, assignedEditorId: editor?.uid ?? undefined, assignedEditorName: editor ? editorLabel(editor) : undefined }
           : b
       ));
       // Notify assigned editor
@@ -712,7 +716,7 @@ export default function BooksPage() {
                       >
                         <option value="">{orgEditors.length === 0 ? "Sin editores" : "Sin asignar"}</option>
                         {orgEditors.map(e => (
-                          <option key={e.uid} value={e.uid}>{e.displayName ?? e.email}</option>
+                          <option key={e.uid} value={e.uid}>{editorLabel(e)}</option>
                         ))}
                       </select>
                     </>

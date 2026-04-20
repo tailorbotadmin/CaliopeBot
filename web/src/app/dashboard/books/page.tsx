@@ -614,11 +614,15 @@ export default function BooksPage() {
         </div>
       ) : (
         <div className="card-static" style={{ overflow: "hidden", padding: 0 }}>
+          {/* Horizontal scroll wrapper — activates when viewport is too narrow */}
+          <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+          {/* Table — min-width ensures columns never collapse */}
+          <div style={{ minWidth: "820px" }}>
           {/* List header */}
           <div style={{
             display: "grid",
-            gridTemplateColumns: "minmax(180px,2fr) 120px minmax(120px,1fr) 110px 80px 1fr",
-            gap: "0 0.75rem",
+            gridTemplateColumns: "minmax(160px,1.5fr) minmax(100px,0.8fr) minmax(130px,1fr) 130px 85px minmax(160px,auto)",
+            gap: "0 0.5rem",
             padding: "0.625rem 1.25rem",
             borderBottom: "1px solid var(--border-color)",
             fontSize: "0.7rem",
@@ -647,8 +651,8 @@ export default function BooksPage() {
                 key={book.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "minmax(180px,2fr) 120px minmax(120px,1fr) 110px 80px 1fr",
-                  gap: "0 0.75rem",
+                  gridTemplateColumns: "minmax(160px,1.5fr) minmax(100px,0.8fr) minmax(130px,1fr) 130px 85px minmax(160px,auto)",
+                  gap: "0 0.5rem",
                   padding: "0.875rem 1.25rem",
                   alignItems: "center",
                   borderBottom: isLast ? "none" : "1px solid var(--border-color)",
@@ -884,6 +888,8 @@ export default function BooksPage() {
               </div>
             );
           })}
+          </div>{/* end min-width wrapper */}
+          </div>{/* end scroll wrapper */}
         </div>
       )}
 

@@ -636,7 +636,7 @@ export default function BooksPage() {
             <span>Editor asignado</span>
             <span>Estado</span>
             <span>Fecha</span>
-            <span style={{ textAlign: "right" }}>Acciones</span>
+            <span>Acciones</span>
           </div>
 
           {books.map((book, idx) => {

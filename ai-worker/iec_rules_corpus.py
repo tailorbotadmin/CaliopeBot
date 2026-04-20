@@ -145,8 +145,8 @@ IEC_RULES: list[dict] = [
     # ── PUNTUACIÓ ────────────────────────────────────────────────────────────
     {
         "name": "Cometes en català",
-        "description": "En català s'utilitzen preferentment les cometes baixes (llatines): «text». "
-                       "Les cometes altes ("text") i simples ('text') s'usen per a citacions dins d'una citació. "
+        "description": "En català s'utilitzen preferentment les cometes baixes (llatines): \u00abtext\u00bb. "
+                       "Les cometes altes (\u201ctext\u201d) i simples (\u2018text\u2019) s'usen per a citacions dins d'una citació. "
                        "No és recomanable usar les cometes anglosaxones com a primer recurs en textos catalans.",
         "category": "Tipografia",
         "source": "IEC Ortografia catalana 2017, §6.4",

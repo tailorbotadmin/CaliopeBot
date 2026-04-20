@@ -44,7 +44,7 @@ type Chunk = {
 // ── Colour helpers ─────────────────────────────────────────────────────────────
 const STATUS_COLOR: Record<CorrectionStatus, { bg: string; border: string; text: string }> = {
   pending:  { bg: "rgba(239,68,68,0.13)",   border: "#ef4444", text: "#dc2626" },
-  rejected: { bg: "rgba(239,68,68,0.08)",   border: "#f87171", text: "#ef4444" },
+  rejected: { bg: "rgba(107,114,128,0.08)", border: "#9ca3af", text: "#6b7280" },
   accepted: { bg: "rgba(16,185,129,0.12)",  border: "#10b981", text: "#059669" },
   edited:   { bg: "rgba(249,115,22,0.13)",  border: "#f97316", text: "#ea580c" },
 };
@@ -65,7 +65,11 @@ function buildSegments(text: string, suggestions: Suggestion[], globalOffset: nu
       const pos = seg.text.indexOf(sugg.originalText);
       if (pos === -1) { next.push(seg); continue; }
       if (pos > 0) next.push({ text: seg.text.slice(0, pos), type: "plain" });
-      next.push({ text: sugg.originalText, type: "correction", sugg, globalIdx });
+      // For accepted/edited: display the corrected text inline; original is preserved in Firestore
+      const displayText = (sugg.status === "accepted" || sugg.status === "edited")
+        ? sugg.correctedText
+        : sugg.originalText;
+      next.push({ text: displayText, type: "correction", sugg, globalIdx });
       const after = seg.text.slice(pos + sugg.originalText.length);
       if (after) next.push({ text: after, type: "plain" });
     }
@@ -75,32 +79,15 @@ function buildSegments(text: string, suggestions: Suggestion[], globalOffset: nu
 }
 
 function AnnotatedText({
-  chunk, suggestions, globalOffset, selectedId, onSelect, showAnnotations, correctedView,
+  chunk, suggestions, globalOffset, selectedId, onSelect, showAnnotations,
 }: {
   chunk: Chunk; suggestions: Suggestion[]; globalOffset: number;
   selectedId: string | null; onSelect: (id: string) => void; showAnnotations: boolean;
-  correctedView: boolean;
 }) {
-  // In corrected view: apply accepted/edited corrections to produce clean text
-  const correctedText = useMemo(() => {
-    if (!correctedView) return null;
-    let text = chunk.text || "";
-    suggestions.forEach(s => {
-      if (s.status === "accepted" || s.status === "edited") {
-        text = text.replace(s.originalText, s.correctedText);
-      }
-    });
-    return text;
-  }, [correctedView, chunk.text, suggestions]);
-
   const segments = useMemo(
     () => buildSegments(chunk.text || "", suggestions, globalOffset),
     [chunk.text, suggestions, globalOffset]
   );
-
-  if (correctedView) {
-    return <span style={{ color: "var(--text-main)" }}>{correctedText}</span>;
-  }
 
   if (!showAnnotations || suggestions.length === 0) {
     return <span>{chunk.text}</span>;
@@ -112,6 +99,7 @@ function AnnotatedText({
         if (seg.type === "plain") return <span key={i}>{seg.text}</span>;
         const col = STATUS_COLOR[seg.sugg.status];
         const isSelected = selectedId === seg.sugg.id;
+        const isRejected = seg.sugg.status === "rejected";
         return (
           <mark
             key={i}
@@ -126,6 +114,8 @@ function AnnotatedText({
               padding: "0 1px",
               transition: "background 0.15s",
               position: "relative",
+              textDecoration: isRejected ? "line-through" : "none",
+              opacity: isRejected ? 0.6 : 1,
             }}
           >
             {seg.text}
@@ -169,7 +159,6 @@ export default function EditorPage() {
   const [categoryFilter, setCategoryFilter] = useState("Todos");
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [showAnnotations, setShowAnnotations] = useState(true);
-  const [correctedView, setCorrectedView] = useState(false);
 
   const docPaneRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -283,6 +272,10 @@ export default function EditorPage() {
     setSelectedId(id);
     scrollToCorrection(id);
     setEditingId(null);
+    // Scroll the right panel so the selected card appears at the top
+    setTimeout(() => {
+      document.getElementById(`panel-card-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
   }, [scrollToCorrection]);
 
   // ── Save suggestion change to Firestore ─────────────────────────────
@@ -515,23 +508,10 @@ export default function EditorPage() {
             {/* Annotation toggle */}
             <button
               className="btn btn-secondary"
-              onClick={() => { setShowAnnotations(v => !v); setCorrectedView(false); }}
-              style={{ fontSize: "0.75rem", padding: "0.35rem 0.65rem", opacity: correctedView ? 0.4 : 1 }}
+              onClick={() => setShowAnnotations(v => !v)}
+              style={{ fontSize: "0.75rem", padding: "0.35rem 0.65rem" }}
             >
               {showAnnotations ? "Ocultar marcas" : "Mostrar marcas"}
-            </button>
-            {/* Corrected view toggle */}
-            <button
-              className="btn btn-secondary"
-              onClick={() => setCorrectedView(v => !v)}
-              style={{ fontSize: "0.75rem", padding: "0.35rem 0.65rem",
-                backgroundColor: correctedView ? "var(--success)" : undefined,
-                color: correctedView ? "#fff" : undefined,
-                borderColor: correctedView ? "var(--success)" : undefined,
-              }}
-              title={correctedView ? "Volver a vista con marcas" : "Ver texto con correcciones aplicadas"}
-            >
-              {correctedView ? "✓ Texto corregido" : "Ver corregido"}
             </button>
             {canManage() && (() => {
               const pendingCount = allSuggestions.filter(s => s.status === "pending").length;
@@ -594,8 +574,7 @@ export default function EditorPage() {
                   globalOffset={offset}
                   selectedId={selectedId}
                   onSelect={handleSelectCorrection}
-                  showAnnotations={showAnnotations && !correctedView}
-                  correctedView={correctedView}
+                  showAnnotations={showAnnotations}
                 />
               </p>
             );
@@ -678,7 +657,9 @@ export default function EditorPage() {
               const globalIdx = allSuggestions.findIndex(s => s.id === sugg.id);
 
               return (
-                <div key={sugg.id}
+                <div
+                  key={sugg.id}
+                  id={`panel-card-${sugg.id}`}
                   style={{
                     margin: "0 0.75rem 0.5rem",
                     borderRadius: "var(--radius-md)",

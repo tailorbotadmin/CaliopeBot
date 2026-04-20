@@ -126,52 +126,99 @@ class BaseAgent:
 
 class VoiceAnalyzerAgent(BaseAgent):
     """
-    One-time analysis of the author's writing style.
+    Full editorial analysis of the manuscript: voice, style, register, audience,
+    intentional authorial choices, and editorial risk flags.
     Called once at the start of processing; result stored in book.voiceProfile.
     """
 
     SCHEMA = {
         "type": "OBJECT",
         "properties": {
-            "resumen": {"type": "STRING"},
-            "rasgos_clave": {"type": "ARRAY", "items": {"type": "STRING"}},
+            "resumen":               {"type": "STRING"},
+            "rasgos_clave":          {"type": "ARRAY", "items": {"type": "STRING"}},
             "instrucciones_agentes": {"type": "STRING"},
             "ejemplos_representativos": {"type": "ARRAY", "items": {"type": "STRING"}},
+            # ── Editorial metadata ──
+            "tipo_texto":         {"type": "STRING"},   # narrativa-ficcion, ensayo-academico, divulgacion...
+            "registro":           {"type": "STRING"},   # formal, informal, literario, academico...
+            "audiencia_objetivo": {"type": "STRING"},   # juvenil-12-16, adulto-general, academico...
+            "variedad_linguistica": {"type": "STRING"}, # espanol-peninsular, latinoamericano-neutro...
+            "decisiones_autorales":  {"type": "ARRAY", "items": {"type": "STRING"}},  # intentional choices
+            "riesgos_editoriales":   {"type": "ARRAY", "items": {"type": "STRING"}},  # legal/sensitivity flags
         },
-        "required": ["resumen", "rasgos_clave", "instrucciones_agentes"],
+        "required": ["resumen", "rasgos_clave", "instrucciones_agentes", "tipo_texto", "registro"],
     }
 
     def __init__(self, client, model: str = "gemini-2.5-flash-lite", vertex_api_key: str = ""):
         super().__init__(client, model, name="voice_analyzer", vertex_api_key=vertex_api_key)
 
     def run(self, sample_paragraphs: List[str]) -> Dict:
-        """Analyze a sample of paragraphs and return a voice profile dict."""
-        sample = "\n\n".join(p for p in sample_paragraphs if p.strip())[:8000]  # cap at ~8k chars
+        """Full editorial analysis. Returns an expanded voice profile."""
+        sample = "\n\n".join(p for p in sample_paragraphs if p.strip())[:10000]
 
-        prompt = f"""Eres un experto en estilística literaria española. Analiza la voz y el estilo del autor en esta muestra.
+        prompt = f"""Eres un Director Editorial senior de una editorial española con 20 años de experiencia.
+Tu misión es hacer un análisis editorial completo de esta muestra de manuscrito.
 
 MUESTRA DEL MANUSCRITO:
 {sample}
 
-Analiza con precisión:
-1. Longitud y estructura típica de las frases (¿cortas y directas? ¿largas y subordinadas?)
-2. Registro lingüístico (formal, informal, coloquial, literario)
-3. Perspectiva narrativa y tiempo verbal predominante
-4. Uso específico de puntuación (¿frecuencia de —, …, ;, ?)
-5. Características del diálogo (¿cómo hablan los personajes?)
-6. Densidad descriptiva (¿narración escueta o rica en detalles?)
-7. Cualquier idiosincrasia o firma estilística del autor
+Analiza en profundidad y responde todos estos campos:
 
-instrucciones_agentes: Escribe un párrafo conciso y directo para los agentes correctores con las directrices de qué NO deben cambiar para respetar la voz del autor. Incluye ejemplos concretos si los detectas.
+1. TIPO DE TEXTO (tipo_texto):
+   ¿Qué tipo de obra es? Una sola etiqueta de: narrativa-ficcion | narrativa-no-ficcion |
+   ensayo-academico | divulgacion-cientifica | divulgacion-periodistica | texto-educativo |
+   texto-corporativo | texto-juridico | texto-juvenil | otro
 
-rasgos_clave: Lista de etiquetas cortas (snake_case) que describen rasgos del estilo, ej: frases_cortas, dialogo_coloquial, puntos_suspensivos_intencionales.
+2. REGISTRO (registro):
+   Nivel de formalidad del texto. Una etiqueta: muy-formal-academico | formal-profesional |
+   neutro-cuidado | informal-divulgativo | coloquial | literario-culto | literario-popular
 
-ejemplos_representativos: 2-3 frases del texto que mejor ilustran la voz del autor."""
+3. AUDIENCIA OBJETIVO (audiencia_objetivo):
+   ¿Para quién está escrito? Una etiqueta: infantil-hasta-12 | juvenil-12-16 |
+   adulto-general | adulto-literario | universitario-especialista | academico-investigador |
+   profesional-sector
+
+4. VARIEDAD LINÜISTÍCA (variedad_linguistica):
+   Qué variedad del español predomina: espanol-peninsular | espanol-latinoamericano-neutro |
+   espanol-mexicano | espanol-rioplatense | espanol-colombiano | espanol-caribe | mixto
+
+5. DECISIONES AUTORALES (decisiones_autorales):
+   Lista de construcciones que PARECEN errores pero son ELECCIONES ESTILÍSTICAS DELIBERADAS.
+   Ejemplos: uso intencional de frases incompletas, repeticiones retóricas, neolovistas, ausencia
+   de signos de exclamación de apertura, mezcla de registros como recurso nararativo, uso expresivo
+   de mayúsculas, puntuación expresiva, fragmentación sintáctica, voz coloquial intencionada.
+   CRITICO: los agentes correctores NO deben tocar estas construcciones.
+
+6. RIESGOS EDITORIALES (riesgos_editoriales):
+   Lista de alertas que el editor debe revisar: citas sin atribuir, afirmaciones que requieren
+   fact-checking, posible contenido sensible (racial, género, salud mental, política, religión),
+   datos estadísticos sin fuente, referencias a personas reales identificables, posible plagio,
+   contenido médico o legal sin disclaimer. Si no hay riesgos, devuelve lista vacía.
+
+7. RESUMEN (resumen):
+   Párrafo de síntesis del estilo, la voz del autor y las características del texto.
+
+8. RASGOS CLAVE (rasgos_clave):
+   Lista corta de etiquetas snake_case del estilo. Ejemplos:
+   frases_largas_subordinadas | párrafos_densos | diálogo_coloquial | narración_introspectiva |
+   tiempo_presente | uso_frecuente_de_puntos_suspensivos | registro_académico_elevado
+
+9. INSTRUCCIONES AGENTES (instrucciones_agentes):
+   Párrafo directo y concreto para los agentes correctores. Indica exactamente qué NO deben
+   cambiar para preservar la voz del autor. Incluye ejemplos concretos del texto.
+
+10. EJEMPLOS REPRESENTATIVOS (ejemplos_representativos):
+    2-3 fragmentos del texto (copia literal) que mejor ilustran la voz del autor."""
 
         try:
             result = self._call_llm(prompt, json_schema=self.SCHEMA, temperature=0.1)
             profile = json.loads(result)
-            logger.info(f"[voice_analyzer] Profile generated: {profile.get('rasgos_clave', [])}")
+            logger.info(
+                f"[voice_analyzer] tipo={profile.get('tipo_texto','?')} "
+                f"registro={profile.get('registro','?')} "
+                f"audiencia={profile.get('audiencia_objetivo','?')} "
+                f"rasgos={profile.get('rasgos_clave', [])}"
+            )
             return profile
         except Exception as e:
             logger.error(f"[voice_analyzer] Error: {e}")
@@ -180,6 +227,12 @@ ejemplos_representativos: 2-3 frases del texto que mejor ilustran la voz del aut
                 "rasgos_clave": [],
                 "instrucciones_agentes": "Sé muy conservador. No modifiques la voz del autor.",
                 "ejemplos_representativos": [],
+                "tipo_texto": "desconocido",
+                "registro": "desconocido",
+                "audiencia_objetivo": "adulto-general",
+                "variedad_linguistica": "espanol-peninsular",
+                "decisiones_autorales": [],
+                "riesgos_editoriales": [],
             }
 
     def _mock_response(self, prompt: str) -> str:
@@ -188,6 +241,12 @@ ejemplos_representativos: 2-3 frases del texto que mejor ilustran la voz del aut
             "rasgos_clave": ["frases_cortas", "registro_informal"],
             "instrucciones_agentes": "No alargues las frases. El diálogo coloquial es intencional.",
             "ejemplos_representativos": [],
+            "tipo_texto": "narrativa-ficcion",
+            "registro": "informal-divulgativo",
+            "audiencia_objetivo": "adulto-general",
+            "variedad_linguistica": "espanol-peninsular",
+            "decisiones_autorales": [],
+            "riesgos_editoriales": [],
         })
 
 
@@ -524,6 +583,119 @@ Prioriza siempre la voz del autor sobre cualquier mejora estilística."""
             return resolved
         except Exception as e:
             logger.error(f"[arbiter] Error: {e}")
+            return []
+
+    def _mock_response(self, prompt: str) -> str:
+        return json.dumps([])
+
+
+# ───────────────────────────────────────────────────────────────────────────────
+# [4] Coherence Agent  (runs once, on the full book text, after all chunks)
+# ───────────────────────────────────────────────────────────────────────────────
+
+class CoherenceAgent(BaseAgent):
+    """
+    Book-level editorial quality analysis: internal coherence, fact-checking,
+    and sensitivity / legal risk detection.
+
+    Runs ONCE after all chunks are individually processed, on the assembled
+    full text (capped at MAX_CHARS). Returns corrections in the same format
+    as CorrectorAgent so they display seamlessly in the corrections panel
+    with categories: "Coherencia" | "Verificación" | "Sensibilidad".
+    """
+
+    MAX_CHARS = 80_000  # ~50 pages; covers most short and medium manuscripts
+
+    SCHEMA = {
+        "type": "ARRAY",
+        "items": {
+            "type": "OBJECT",
+            "properties": {
+                "originalText":  {"type": "STRING"},   # exact fragment from the text
+                "correctedText": {"type": "STRING"},   # suggested fix, or flag
+                "justification": {"type": "STRING"},
+                "reglaAplicada": {"type": "STRING"},
+                "riskLevel":     {"type": "STRING"},   # high | medium | low
+                "category":      {"type": "STRING"},   # Coherencia | Verificación | Sensibilidad
+            },
+            "required": ["originalText", "justification", "category", "riskLevel"],
+        },
+    }
+
+    def __init__(self, client, vector_store=None, model: str = "gemini-2.5-flash-lite", vertex_api_key: str = ""):
+        super().__init__(client, model, name="coherence", vertex_api_key=vertex_api_key)
+        self.vector_store = vector_store
+
+    def run(self, full_text: str, org_id: str, voice_profile: Dict) -> List[Dict]:
+        text_sample = full_text[:self.MAX_CHARS]
+        tipo_texto   = voice_profile.get("tipo_texto", "desconocido")
+        audiencia    = voice_profile.get("audiencia_objetivo", "adulto-general")
+        decisiones   = voice_profile.get("decisiones_autorales", [])
+        decisiones_str = "; ".join(decisiones) if decisiones else "ninguna identificada"
+
+        prompt = f"""Eres un Editor Jefe de una editorial española de prestigio con 20 años de experiencia.
+Analizas el siguiente texto completo para detectar problemas editoriales de nivel superior.
+Ortografía y tildes YA están cubiertas por otro agente — no las repitas.
+
+PERFIL DEL TEXTO:
+- Tipo: {tipo_texto}
+- Audiencia: {audiencia}
+- Decisiones autorales a RESPETAR (no son errores): {decisiones_str}
+
+════ TEXTO ════
+{text_sample}
+
+════ TU MISIÓN ════
+Detecta todos los problemas editoriales en estas tres categorías (sáltate lo que esté bien).
+
+Para CADA problema, devuelve:
+- originalText: fragmento EXACTO (copia literal del texto) donde está el problema
+- correctedText: corrección concreta, o "[REQUIERE REVISIÓN EDITORIAL]" si no es automático
+- justification: explicación clara del problema y su impacto en la calidad del libro
+- reglaAplicada: etiqueta del tipo de problema (coherencia-nombres, coherencia-fechas, fact-check, sensibilidad-legal, etc.)
+- riskLevel: "high" (correción urgente) | "medium" (importante) | "low" (menor)
+- category: UNA de → Coherencia | Verificación | Sensibilidad
+
+——— CATEGORÍA 1: COHERENCIA INTERNA (category: "Coherencia") ———
+• Nombres de personajes que cambian sin explicación (Marta en cap.3 / María en cap.17)
+• Edades o datos biográficos contradictorios entre distintas partes
+• Lugares cuya descripción o ubicación varía sin motivo narrativo
+• Información revelada "antes de ser revelada" (spoiler involuntario o continuidad rota)
+• Datos factuales que se contradicen: estadísticas, fechas históricas, nombres de organismos
+• Saltos temporales confusos o sin señalizar
+
+——— CATEGORÍA 2: VERIFICACIÓN DE DATOS (category: "Verificación") ———
+• Afirmaciones sobre hechos verificables que parecen incorrectos (fechas históricas, cargos, estadísticas)
+• Citas textuales atribuidas a personas sin entrecomillar correctamente o sin fuente clara
+• Referencias a estudios, informes o datos sin citar fuente
+• Datos estadísticos que parecen improbables o imposibles ("el 200% de los estudiantes")
+• Nombres propios de personas, instituciones o lugares que parecen incorrectos
+
+——— CATEGORÍA 3: SENSIBILIDAD Y RIESGO LEGAL (category: "Sensibilidad") ———
+• Afirmaciones potencialmente difamatorias sobre personas reales identificables
+• Datos personales que no deberían publicarse (direcciones, teléfonos, datos médicos)
+• Contenido potencialmente ofensivo sobre grupos (raza, género, religión, salud mental,
+  discapacidad, orientación sexual) sin intención artística clara y calibrada
+• Fragmentos muy similares a obras conocidas sin atribución (posible plagio)
+• Consejo legal o médico presentado como definitivo sin disclaimer
+• Material con derechos de autor reproduciido sin permiso aparente
+
+Devuelve [] si el texto está bien. NO repitas correcciones ortográficas.
+Devuelve SOLO el array JSON."""
+
+        try:
+            result = self._call_llm(prompt, json_schema=self.SCHEMA, temperature=0.2)
+            corrections = json.loads(result)
+            for c in corrections:
+                c["id"] = f"coh_{uuid.uuid4().hex[:8]}"
+                c.setdefault("correctedText", "[REQUIERE REVISIÓN EDITORIAL]")
+                c.setdefault("reglaAplicada", "Análisis editorial")
+                c.setdefault("riskLevel", "medium")
+                c.setdefault("status", "pending")
+            logger.info(f"[coherence] {len(corrections)} editorial issues found")
+            return corrections
+        except Exception as e:
+            logger.error(f"[coherence] Error: {e}")
             return []
 
     def _mock_response(self, prompt: str) -> str:

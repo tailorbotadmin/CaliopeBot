@@ -106,13 +106,14 @@ except Exception as e:
 # ==========================================
 # AI AGENTS
 # ==========================================
-from app.services.agents import VoiceAnalyzerAgent, CorrectorAgent, RevisorAgent, ArbiterAgent
+from app.services.agents import VoiceAnalyzerAgent, CorrectorAgent, RevisorAgent, ArbiterAgent, CoherenceAgent
 
 _vertex_key = settings.VERTEX_API_KEY or settings.GEMINI_API_KEY
 voice_analyzer = VoiceAnalyzerAgent(client=client, model=settings.LLM_MODEL, vertex_api_key=_vertex_key)
 corrector = CorrectorAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL, vertex_api_key=_vertex_key)
 revisor   = RevisorAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL, vertex_api_key=_vertex_key)
 arbiter   = ArbiterAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL, vertex_api_key=_vertex_key)
+coherence_agent = CoherenceAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL, vertex_api_key=_vertex_key)
 
 # ==========================================
 # METRICS
@@ -530,6 +531,59 @@ async def process_book_background(org_id: str, book_id: str, author_id: str):
 
         book_ref.update({"status": "review_editor", "processedChunks": processed_count})
         logger.info(f"Pipeline complete: book={book_id}, chunks={processed_count}")
+
+        # ══ Step Final: Book-level coherence & editorial quality analysis ═════════════
+        try:
+            logger.info(f"[book={book_id}] Starting book-level coherence analysis...")
+            all_texts_for_coherence = [
+                c.to_dict().get("text", "") for c in all_chunks
+                if c.to_dict().get("text", "").strip()
+            ]
+            full_text_for_coherence = "\n\n".join(all_texts_for_coherence)
+
+            coherence_corrections = coherence_agent.run(
+                full_text_for_coherence, org_id, voice_profile
+            )
+
+            if coherence_corrections:
+                for cc in coherence_corrections:
+                    original = cc.get("originalText", "").strip()
+                    if not original:
+                        continue
+                    # Find the chunk containing this fragment (exact match)
+                    target_chunk_id = None
+                    for chunk_doc in all_chunks:
+                        if original in chunk_doc.to_dict().get("text", ""):
+                            target_chunk_id = chunk_doc.id
+                            break
+                    # If not found (cross-chunk issue), attach to first content chunk
+                    if target_chunk_id is None and all_chunks:
+                        target_chunk_id = all_chunks[0].id
+
+                    if target_chunk_id:
+                        current_data = chunks_ref.document(target_chunk_id).get().to_dict() or {}
+                        current_suggs = current_data.get("suggestions", [])
+                        current_suggs.append(cc)
+                        chunks_ref.document(target_chunk_id).update({"suggestions": current_suggs})
+
+                logger.info(f"[book={book_id}] Coherence: {len(coherence_corrections)} issues attached")
+
+            # Store expanded editorial profile in the book document
+            editorial_analysis = {
+                "tipo_texto":          voice_profile.get("tipo_texto", ""),
+                "registro":            voice_profile.get("registro", ""),
+                "audiencia_objetivo":  voice_profile.get("audiencia_objetivo", ""),
+                "variedad_linguistica": voice_profile.get("variedad_linguistica", ""),
+                "decisiones_autorales": voice_profile.get("decisiones_autorales", []),
+                "riesgos_editoriales":  voice_profile.get("riesgos_editoriales", []),
+                "rasgos_clave":         voice_profile.get("rasgos_clave", []),
+                "coherence_issues":     len(coherence_corrections),
+            }
+            book_ref.update({"editorial_analysis": editorial_analysis})
+            logger.info(f"[book={book_id}] Editorial analysis stored: {editorial_analysis}")
+
+        except Exception as coh_err:
+            logger.error(f"[book={book_id}] Coherence analysis failed (non-fatal): {coh_err}", exc_info=True)
 
 
     except Exception as e:

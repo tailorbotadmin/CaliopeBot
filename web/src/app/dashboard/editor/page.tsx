@@ -51,7 +51,21 @@ const STATUS_COLOR: Record<CorrectionStatus, { bg: string; border: string; text:
   edited:   { bg: "rgba(249,115,22,0.13)",  border: "#f97316", text: "#ea580c" },
 };
 
-const CATEGORIES = ["Todos", "Tildes", "Gramática", "Puntuación", "Extranjerismos", "Ortografía", "Léxico", "Tipografía"];
+const CATEGORIES = [
+  "Todos",
+  // Linguistic corrections
+  "Tildes", "Gramática", "Puntuación", "Extranjerismos", "Ortografía", "Léxico", "Tipografía",
+  // Editorial quality (from CoherenceAgent)
+  "Coherencia", "Verificación", "Sensibilidad",
+];
+
+// Category display config for editorial categories
+const CATEGORY_META: Record<string, { color: string; icon: string }> = {
+  Coherencia:   { color: "#8b5cf6", icon: "🧩" },
+  Verificación: { color: "#f59e0b", icon: "⚠️" },
+  Sensibilidad: { color: "#ef4444", icon: "🚨" },
+};
+
 
 // ── Chapter / section detection (2-level: main chapter + subcapítulo) ─────────────
 /** Returns 0=plain, 1=main chapter, 2=subcapítulo */
@@ -188,6 +202,18 @@ export default function EditorPage() {
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [showAnnotations, setShowAnnotations] = useState(true);
   const [collapsedChapters, setCollapsedChapters] = useState<Set<string>>(new Set());
+  const [showEditorialPanel, setShowEditorialPanel] = useState(false);
+  const [editorialAnalysis, setEditorialAnalysis] = useState<{
+    tipo_texto?: string;
+    registro?: string;
+    audiencia_objetivo?: string;
+    variedad_linguistica?: string;
+    decisiones_autorales?: string[];
+    riesgos_editoriales?: string[];
+    rasgos_clave?: string[];
+    coherence_issues?: number;
+  } | null>(null);
+
 
   const docPaneRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -223,6 +249,8 @@ export default function EditorPage() {
         setBookTitle(d.title ?? "");
         setTotalChunks(d.totalChunks ?? 0);
         setProcessedCount(d.processedChunks ?? 0);
+        if (d.editorial_analysis) setEditorialAnalysis(d.editorial_analysis);
+
       }
     });
   }, [effectiveOrgId, bookId]);
@@ -736,8 +764,97 @@ export default function EditorPage() {
               {isAnalyzing && <span style={{ fontSize: "0.75rem", color: "var(--primary)", display: "flex", alignItems: "center", gap: "0.25rem" }}>
                 <Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} /> Analizando
               </span>}
+              {/* Editorial profile badges */}
+              {editorialAnalysis?.tipo_texto && (
+                <button
+                  onClick={() => setShowEditorialPanel(v => !v)}
+                  title="Análisis editorial — clic para ver detalles"
+                  style={{
+                    display: "flex", alignItems: "center", gap: "0.3rem",
+                    background: "none", border: "1px solid var(--border-color)", borderRadius: "99px",
+                    padding: "0.15rem 0.55rem", cursor: "pointer",
+                    fontSize: "0.65rem", fontWeight: 700, color: "var(--text-muted)",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  📋 {editorialAnalysis.tipo_texto?.replace(/-/g, " ")}
+                  {editorialAnalysis.registro && (
+                    <span style={{ color: "var(--primary)", borderLeft: "1px solid var(--border-color)", paddingLeft: "0.35rem" }}>
+                      {editorialAnalysis.registro?.replace(/-/g, " ")}
+                    </span>
+                  )}
+                  {(editorialAnalysis.riesgos_editoriales?.length ?? 0) > 0 && (
+                    <span style={{ color: "#ef4444", marginLeft: "0.2rem" }}>⚠️</span>
+                  )}
+                </button>
+              )}
             </div>
           </div>
+          {/* ── Editorial Analysis Panel (collapsible) ── */}
+          {showEditorialPanel && editorialAnalysis && (
+            <div style={{
+              padding: "0.85rem 1.5rem",
+              backgroundColor: "rgba(99,102,241,0.04)",
+              borderTop: "1px solid var(--border-color)",
+              display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "0.75rem",
+              fontSize: "0.72rem",
+            }}>
+              {/* Metadata row */}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", gridColumn: "1 / -1" }}>
+                {[
+                  { label: "Tipo", value: editorialAnalysis.tipo_texto },
+                  { label: "Registro", value: editorialAnalysis.registro },
+                  { label: "Audiencia", value: editorialAnalysis.audiencia_objetivo },
+                  { label: "Variedad", value: editorialAnalysis.variedad_linguistica },
+                ].map(({ label, value }) => value ? (
+                  <span key={label} style={{
+                    padding: "0.2rem 0.55rem", borderRadius: "99px",
+                    backgroundColor: "rgba(99,102,241,0.1)", color: "var(--primary)",
+                    fontWeight: 700, fontSize: "0.65rem",
+                  }}>
+                    {label}: {value.replace(/-/g, " ")}
+                  </span>
+                ) : null)}
+              </div>
+              {/* Decisiones autorales */}
+              {(editorialAnalysis.decisiones_autorales?.length ?? 0) > 0 && (
+                <div>
+                  <div style={{ fontWeight: 700, color: "#10b981", marginBottom: "0.3rem" }}>
+                    ✅ Decisiones autorales (no corregir)
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: "1.2em", color: "var(--text-muted)", lineHeight: 1.7 }}>
+                    {editorialAnalysis.decisiones_autorales?.map((d, i) => <li key={i}>{d}</li>)}
+                  </ul>
+                </div>
+              )}
+              {/* Riesgos editoriales */}
+              {(editorialAnalysis.riesgos_editoriales?.length ?? 0) > 0 && (
+                <div>
+                  <div style={{ fontWeight: 700, color: "#ef4444", marginBottom: "0.3rem" }}>
+                    ⚠️ Riesgos editoriales
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: "1.2em", color: "var(--text-muted)", lineHeight: 1.7 }}>
+                    {editorialAnalysis.riesgos_editoriales?.map((r, i) => <li key={i}>{r}</li>)}
+                  </ul>
+                </div>
+              )}
+              {/* Rasgos clave */}
+              {(editorialAnalysis.rasgos_clave?.length ?? 0) > 0 && (
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <div style={{ fontWeight: 700, color: "var(--text-muted)", marginBottom: "0.3rem" }}>Rasgos de estilo</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
+                    {editorialAnalysis.rasgos_clave?.map((r, i) => (
+                      <span key={i} style={{
+                        padding: "0.1rem 0.45rem", borderRadius: "4px",
+                        backgroundColor: "var(--bg-surface)", border: "1px solid var(--border-color)",
+                        color: "var(--text-muted)", fontSize: "0.62rem", fontFamily: "monospace",
+                      }}>{r}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="editor-actions">
             {/* Annotation toggle */}

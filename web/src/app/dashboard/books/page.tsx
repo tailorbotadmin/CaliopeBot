@@ -10,6 +10,7 @@ import {
 import {
   FolderOpen, FileText, UploadCloud, CheckCircle2, Clock, Loader2,
   Download, Unlock, AlertCircle, RefreshCw, Trash2, UserCircle2, Plus, X, UserCheck,
+  Pencil, FileDown, ChevronDown,
 } from "lucide-react";
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { storage, db } from "@/lib/firebase";
@@ -62,6 +63,7 @@ export default function BooksPage() {
   const [reopeningId, setReopeningId] = useState<string | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [downloadMenuId, setDownloadMenuId] = useState<string | null>(null);
 
   // Delete confirmation modal
   const [deleteTarget, setDeleteTarget] = useState<Book | null>(null);
@@ -134,6 +136,7 @@ export default function BooksPage() {
   const handleDownloadEditedDocx = async (book: Book) => {
     if (!book.id || !selectedOrgId) return;
     setDownloadingId(book.id);
+    setDownloadMenuId(null);
     try {
       const chunksRef = collection(db, "organizations", selectedOrgId, "books", book.id, "chunks");
       const q = query(chunksRef, orderBy("order", "asc"));
@@ -167,6 +170,64 @@ export default function BooksPage() {
       setDownloadingId(null);
     }
   };
+
+  // ---- Download as PDF ----
+  const handleDownloadPDF = async (book: Book) => {
+    if (!book.id || !selectedOrgId) return;
+    setDownloadingId(book.id);
+    setDownloadMenuId(null);
+    try {
+      const { jsPDF } = await import("jspdf");
+      const chunksRef = collection(db, "organizations", selectedOrgId, "books", book.id, "chunks");
+      const q = query(chunksRef, orderBy("order", "asc"));
+      const snap = await getDocs(q);
+
+      const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+      const margin = 20;
+      const pageW = pdf.internal.pageSize.getWidth() - margin * 2;
+      const pageH = pdf.internal.pageSize.getHeight() - margin * 2;
+      let y = margin;
+
+      pdf.setFont("times", "normal");
+      pdf.setFontSize(11);
+
+      // Title
+      pdf.setFont("times", "bold");
+      pdf.setFontSize(14);
+      const titleLines = pdf.splitTextToSize(book.title, pageW);
+      pdf.text(titleLines, margin, y);
+      y += titleLines.length * 7 + 6;
+      pdf.setFont("times", "normal");
+      pdf.setFontSize(11);
+
+      snap.docs.forEach(d => {
+        const data = d.data();
+        const text = data.text ?? "";
+        const suggestions: { originalText: string; correctedText: string; status: string }[] =
+          data.suggestions ?? [];
+        let final = text;
+        suggestions
+          .filter(s => s.status === "accepted")
+          .sort((a, b) => b.originalText.length - a.originalText.length)
+          .forEach(s => { final = final.replaceAll(s.originalText, s.correctedText); });
+
+        if (!final.trim()) return;
+        const lines = pdf.splitTextToSize(final, pageW);
+        const blockH = lines.length * 5.5 + 4;
+        if (y + blockH > margin + pageH) { pdf.addPage(); y = margin; }
+        pdf.text(lines, margin, y);
+        y += blockH;
+      });
+
+      pdf.save(`${book.title.replace(/\s+/g, "_")}_editado.pdf`);
+    } catch (err) {
+      console.error("Error generando PDF:", err);
+      alert("Error generando el PDF.");
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
 
   // ---- Reopen editing ----
   const handleReopenEditing = async (book: Book) => {
@@ -514,7 +575,7 @@ export default function BooksPage() {
   }
 
   return (
-    <div className="fade-in" style={{ padding: "2.5rem", maxWidth: "1100px", margin: "0 auto" }}>
+    <div className="fade-in" style={{ padding: "2rem 2.5rem", width: "100%", boxSizing: "border-box" }}>
       {/* Header */}
       <div className="page-header">
         <div>
@@ -553,8 +614,8 @@ export default function BooksPage() {
           {/* List header */}
           <div style={{
             display: "grid",
-            gridTemplateColumns: "200px 100px 150px 105px 80px 145px",
-            gap: "0 0.5rem",
+            gridTemplateColumns: "minmax(180px,2fr) 120px minmax(120px,1fr) 110px 80px 1fr",
+            gap: "0 0.75rem",
             padding: "0.625rem 1.25rem",
             borderBottom: "1px solid var(--border-color)",
             fontSize: "0.7rem",
@@ -577,17 +638,19 @@ export default function BooksPage() {
               ? book.createdAt.toDate().toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" })
               : "—";
             const isLast = idx === books.length - 1;
+            const canDownload = ["review_editor", "review_author", "review_responsable", "approved"].includes(book.status);
             return (
               <div
                 key={book.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "200px 100px 150px 105px 80px 145px",
-                  gap: "0 0.5rem",
+                  gridTemplateColumns: "minmax(180px,2fr) 120px minmax(120px,1fr) 110px 80px 1fr",
+                  gap: "0 0.75rem",
                   padding: "0.875rem 1.25rem",
                   alignItems: "center",
                   borderBottom: isLast ? "none" : "1px solid var(--border-color)",
                   transition: "background 0.15s",
+                  position: "relative",
                 }}
                 onMouseEnter={e => (e.currentTarget.style.background = "var(--bg-color)")}
                 onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
@@ -674,8 +737,8 @@ export default function BooksPage() {
                   <Clock size={11} />{dateStr}
                 </div>
 
-                {/* Actions */}
-                <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "0.375rem" }}>
+                {/* Actions — right-aligned, flex with gap */}
+                <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "0.3rem" }}>
                   {/* Retry — for error/draft: full re-ingestion */}
                   {(book.status === "error" || book.status === "draft") && book.fileUrl && (
                     <button
@@ -691,7 +754,7 @@ export default function BooksPage() {
                     </button>
                   )}
 
-                  {/* Retry — for stuck processing: re-trigger analysis without re-ingestion */}
+                  {/* Retry — for stuck processing */}
                   {book.status === "processing" && (
                     <button
                       title="El análisis parece bloqueado. Haz clic para reiniciarlo."
@@ -706,10 +769,10 @@ export default function BooksPage() {
                     </button>
                   )}
 
-                  {/* Retry analysis — for review_editor with 0 suggestions (analysis failed silently) */}
+                  {/* Retry analysis — for review_editor */}
                   {book.status === "review_editor" && (
                     <button
-                      title="Reanálisis IA (el análisis anterior falló)"
+                      title="Reanálisis IA"
                       className="btn btn-secondary"
                       style={{ padding: "0.3rem 0.5rem", fontSize: "0.75rem", display: "flex", alignItems: "center", gap: "0.25rem", color: "#f59e0b", borderColor: "rgba(245,158,11,0.4)" }}
                       onClick={() => handleRetryAnalysis(book)}
@@ -721,31 +784,70 @@ export default function BooksPage() {
                     </button>
                   )}
 
-                  {/* Open editor */}
+                  {/* Open editor — pencil icon */}
                   {book.status !== "error" && book.status !== "draft" && (
                     <Link
                       href={`/dashboard/editor?bookId=${book.id}`}
-                      title={book.status === "approved" ? "Ver en Editor" : "Abrir Editor"}
+                      title={book.status === "approved" ? "Ver manuscrito" : "Editar manuscrito"}
                       className="btn btn-secondary"
-                      style={{ padding: "0.3rem 0.6rem", fontSize: "0.78rem", textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+                      style={{ padding: "0.3rem 0.55rem", textDecoration: "none", display: "inline-flex", alignItems: "center" }}
                     >
-                      {book.status === "approved" ? "Ver" : "Editar →"}
+                      <Pencil size={13} />
                     </Link>
                   )}
 
-                  {/* Download edited docx — available from review_editor onwards */}
-                  {["review_editor", "review_author", "review_responsable", "approved"].includes(book.status) && (
-                    <button
-                      title="Descargar manuscrito editado (.docx)"
-                      className="btn"
-                      style={{ padding: "0.3rem 0.5rem", fontSize: "0.75rem", backgroundColor: "var(--success)", display: "flex", alignItems: "center" }}
-                      onClick={() => handleDownloadEditedDocx(book)}
-                      disabled={downloadingId === book.id}
-                    >
-                      {downloadingId === book.id
-                        ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
-                        : <Download size={13} />}
-                    </button>
+                  {/* Download — Word / PDF dropdown */}
+                  {canDownload && (
+                    <div style={{ position: "relative" }}>
+                      <button
+                        title="Descargar manuscrito editado"
+                        className="btn"
+                        style={{ padding: "0.3rem 0.45rem", fontSize: "0.75rem", backgroundColor: "var(--success)", display: "flex", alignItems: "center", gap: "0.2rem" }}
+                        onClick={() => setDownloadMenuId(downloadMenuId === book.id ? null : book.id)}
+                        disabled={downloadingId === book.id}
+                      >
+                        {downloadingId === book.id
+                          ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
+                          : <><FileDown size={13} /><ChevronDown size={11} /></>}
+                      </button>
+                      {/* Dropdown */}
+                      {downloadMenuId === book.id && (
+                        <div style={{
+                          position: "absolute", right: 0, top: "calc(100% + 4px)", zIndex: 50,
+                          backgroundColor: "var(--bg-surface)", border: "1px solid var(--border-color)",
+                          borderRadius: "var(--radius)", boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
+                          minWidth: "140px", overflow: "hidden",
+                        }}>
+                          <button
+                            onClick={() => handleDownloadEditedDocx(book)}
+                            style={{
+                              display: "flex", alignItems: "center", gap: "0.5rem",
+                              width: "100%", padding: "0.55rem 0.85rem",
+                              background: "none", border: "none", cursor: "pointer",
+                              fontSize: "0.8rem", color: "var(--text-main)", textAlign: "left",
+                            }}
+                            onMouseEnter={e => (e.currentTarget.style.background = "var(--bg-color)")}
+                            onMouseLeave={e => (e.currentTarget.style.background = "none")}
+                          >
+                            <span style={{ fontSize: "1rem" }}>📄</span> Word (.docx)
+                          </button>
+                          <button
+                            onClick={() => handleDownloadPDF(book)}
+                            style={{
+                              display: "flex", alignItems: "center", gap: "0.5rem",
+                              width: "100%", padding: "0.55rem 0.85rem",
+                              background: "none", border: "none", cursor: "pointer",
+                              fontSize: "0.8rem", color: "var(--text-main)", textAlign: "left",
+                              borderTop: "1px solid var(--border-color)",
+                            }}
+                            onMouseEnter={e => (e.currentTarget.style.background = "var(--bg-color)")}
+                            onMouseLeave={e => (e.currentTarget.style.background = "none")}
+                          >
+                            <span style={{ fontSize: "1rem" }}>📕</span> PDF
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   {/* Reopen editing */}
@@ -763,7 +865,7 @@ export default function BooksPage() {
                     </button>
                   )}
 
-                  {/* Delete — triggers confirmation modal */}
+                  {/* Delete */}
                   <button
                     title="Eliminar manuscrito"
                     className="btn btn-secondary"

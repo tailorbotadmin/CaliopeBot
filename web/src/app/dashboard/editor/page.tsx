@@ -39,6 +39,7 @@ type Chunk = {
   order: number;
   status: string;
   style?: string;
+  page?: number;  // explicit page from ingestion (if available)
   suggestions?: Suggestion[];
 };
 
@@ -52,23 +53,31 @@ const STATUS_COLOR: Record<CorrectionStatus, { bg: string; border: string; text:
 
 const CATEGORIES = ["Todos", "Tildes", "Gramática", "Puntuación", "Extranjerismos", "Ortografía", "Léxico", "Tipografía"];
 
-// ── Chapter / section detection ────────────────────────────────────────────────
-function detectChapterHeader(chunk: Chunk): boolean {
+// ── Chapter / section detection (2-level: main chapter + subcapítulo) ─────────────
+/** Returns 0=plain, 1=main chapter, 2=subcapítulo */
+function detectChapterLevel(chunk: Chunk): 0 | 1 | 2 {
   const style = (chunk.style ?? "").toLowerCase();
+  // Explicit docx heading styles
   if (
-    style.includes("heading") ||
-    style.includes("título") ||
-    style.includes("titulo") ||
-    style.includes("chapter") ||
-    style.includes("section")
-  ) return true;
-  // Heuristic: short text (<= 120 chars) starting with "N " or "N. " + capital letter
+    style === "heading 1" || style.match(/t[íì]tulo\s*1/i) ||
+    style === "title" || style === "chapter"
+  ) return 1;
+  if (
+    style === "heading 2" || style === "heading 3" ||
+    style.match(/t[íì]tulo\s*[23]/i) || style === "section"
+  ) return 2;
+  // Any other heading style → level 1
+  if (style.includes("heading") || style.includes("título") || style.includes("titulo")) return 1;
+
   const text = chunk.text.trim();
-  if (text.length <= 120 && /^\d+[\s\.]+[A-ZÁÉÍÓÚÑÜ]/u.test(text)) return true;
-  return false;
+  // Level 1: "1 Título", "2. Otro Título" (single number, short)
+  if (text.length <= 120 && /^\d+[\s\.]+[A-ZÁÉÍÓÚÑÜ]/u.test(text) && !/^\d+\.\d/.test(text)) return 1;
+  // Level 2: "1.1 Subtítulo", "1.1. Sub", "a) Apartado"
+  if (text.length <= 100 && (/^\d+\.\d+[\s\.]/.test(text) || /^[a-z\u00e1\u00e9\u00ed\u00f3\u00fa]\)\s+[A-Z]/u.test(text))) return 2;
+  return 0;
 }
 
-type ChapterGroup = { id: string; title: string; chunkIds: Set<string> };
+type ChapterGroup = { id: string; title: string; level: 1 | 2; chunkIds: Set<string> };
 
 // ── AnnotatedText ─────────────────────────────────────────────────────────────
 // Renders a chunk's text with inline highlighted correction spans.
@@ -265,20 +274,28 @@ export default function EditorPage() {
     [allSuggestions, categoryFilter]
   );
 
-  // ── Group chunks into chapter sections ───────────────────────────────
+  // ── Group chunks into chapter sections (2-level: capítulo + subcapítulo) ──
   const chapterGroups = useMemo((): ChapterGroup[] => {
     const groups: ChapterGroup[] = [];
-    let current: ChapterGroup | null = null;
+    let currentL1: ChapterGroup | null = null;
+    let currentContent: ChapterGroup | null = null; // where to attach plain chunks
     chunks.forEach(chunk => {
-      if (detectChapterHeader(chunk)) {
-        current = { id: `ch-${chunk.id}`, title: chunk.text.trim(), chunkIds: new Set([chunk.id]) };
-        groups.push(current);
+      const level = detectChapterLevel(chunk);
+      if (level === 1) {
+        currentL1 = { id: `ch1-${chunk.id}`, title: chunk.text.trim(), level: 1, chunkIds: new Set([chunk.id]) };
+        groups.push(currentL1);
+        currentContent = currentL1;
+      } else if (level === 2) {
+        const sub: ChapterGroup = { id: `ch2-${chunk.id}`, title: chunk.text.trim(), level: 2, chunkIds: new Set([chunk.id]) };
+        groups.push(sub);
+        currentContent = sub;
       } else {
-        if (!current) {
-          current = { id: "ch-preamble", title: "Documento", chunkIds: new Set() };
-          groups.push(current);
+        if (!currentContent) {
+          currentContent = { id: "ch-preamble", title: "Documento", level: 1, chunkIds: new Set() };
+          groups.push(currentContent);
+          currentL1 = currentContent;
         }
-        current.chunkIds.add(chunk.id);
+        currentContent.chunkIds.add(chunk.id);
       }
     });
     return groups;
@@ -316,6 +333,25 @@ export default function EditorPage() {
     return map;
   }, [chunks]);
 
+  // ── Page numbers: use stored chunk.page when available, else estimate by word count ──
+  const chunkPageNumbers = useMemo(() => {
+    const map: Record<string, number> = {};
+    let wordCount = 0;
+    const WORDS_PER_PAGE = 300;
+    chunks.forEach(chunk => {
+      map[chunk.id] = (chunk.page != null)
+        ? chunk.page
+        : Math.floor(wordCount / WORDS_PER_PAGE) + 1;
+      wordCount += chunk.text.split(/\s+/).filter(Boolean).length;
+    });
+    return map;
+  }, [chunks]);
+
+  const totalPages = useMemo(() => {
+    const vals = Object.values(chunkPageNumbers);
+    return vals.length > 0 ? Math.max(...vals) : 1;
+  }, [chunkPageNumbers]);
+
   // ── Scroll to correction in doc ──────────────────────────────────────
   const scrollToCorrection = useCallback((id: string) => {
     const el = document.getElementById(`mark-${id}`);
@@ -326,11 +362,24 @@ export default function EditorPage() {
     setSelectedId(id);
     scrollToCorrection(id);
     setEditingId(null);
-    // Scroll the right panel so the selected card appears at the top
+    // Auto-expand the chapter that contains this correction (if it was collapsed)
+    const sugg = allSuggestions.find(s => s.id === id);
+    if (sugg) {
+      const ownerChapter = chapterGroups.find(g => g.chunkIds.has(sugg.chunkId));
+      if (ownerChapter) {
+        setCollapsedChapters(prev => {
+          if (!prev.has(ownerChapter.id)) return prev;
+          const next = new Set(prev);
+          next.delete(ownerChapter.id);
+          return next;
+        });
+      }
+    }
+    // Scroll panel card into view (tiny delay to let the chapter expand first)
     setTimeout(() => {
       document.getElementById(`panel-card-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 50);
-  }, [scrollToCorrection]);
+    }, 120);
+  }, [scrollToCorrection, allSuggestions, chapterGroups]);
 
   // ── Save suggestion change to Firestore ─────────────────────────────
   const saveSuggestion = async (chunkId: string, newSuggestions: Suggestion[]) => {
@@ -749,20 +798,45 @@ export default function EditorPage() {
             color: "var(--text-main)", backgroundColor: "var(--bg-color)",
           }}
         >
-          {chunks.map(chunk => {
+          {chunks.map((chunk, i) => {
             const chunkSuggs = (chunk.suggestions ?? []) as Suggestion[];
             const offset = chunkGlobalOffset[chunk.id] ?? 0;
+            const currentPage = chunkPageNumbers[chunk.id] ?? 1;
+            const prevPage = i > 0 ? (chunkPageNumbers[chunks[i - 1].id] ?? 1) : 1;
+            const showPageBreak = i > 0 && currentPage > prevPage;
             return (
-              <p key={chunk.id} style={{ marginBottom: "1.5rem" }}>
-                <AnnotatedText
-                  chunk={chunk}
-                  suggestions={chunkSuggs}
-                  globalOffset={offset}
-                  selectedId={selectedId}
-                  onSelect={handleSelectCorrection}
-                  showAnnotations={showAnnotations}
-                />
-              </p>
+              <>
+                {showPageBreak && (
+                  <div key={`pb-${chunk.id}`} style={{
+                    margin: "2.5rem -3rem",
+                    display: "flex", alignItems: "center", gap: "1rem",
+                    color: "var(--text-muted)", fontSize: "0.7rem", fontWeight: 600,
+                    letterSpacing: "0.08em", userSelect: "none",
+                  }}>
+                    <div style={{ flex: 1, height: "1px", backgroundColor: "var(--border-color)" }} />
+                    <span style={{
+                      padding: "0.2rem 0.8rem",
+                      border: "1px solid var(--border-color)",
+                      borderRadius: "99px",
+                      backgroundColor: "var(--bg-surface)",
+                      whiteSpace: "nowrap",
+                    }}>
+                      Página {currentPage}
+                    </span>
+                    <div style={{ flex: 1, height: "1px", backgroundColor: "var(--border-color)" }} />
+                  </div>
+                )}
+                <p key={chunk.id} style={{ marginBottom: "1.5rem" }}>
+                  <AnnotatedText
+                    chunk={chunk}
+                    suggestions={chunkSuggs}
+                    globalOffset={offset}
+                    selectedId={selectedId}
+                    onSelect={handleSelectCorrection}
+                    showAnnotations={showAnnotations}
+                  />
+                </p>
+              </>
             );
           })}
         </div>
@@ -857,25 +931,42 @@ export default function EditorPage() {
                   const isCollapsed = collapsedChapters.has(chapter.id);
                   const pendingInChapter = chapterSuggs.filter(s => s.status === "pending").length;
                   return (
-                    <div key={chapter.id} style={{ marginBottom: "0.25rem" }}>
-                      {/* Chapter header */}
+                    <div key={chapter.id} style={{ marginBottom: "0.15rem" }}>
+                      {/* Chapter / subcapítulo header */}
                       <div
                         onClick={() => toggleChapter(chapter.id)}
                         style={{
                           display: "flex", alignItems: "center", gap: "0.4rem",
-                          padding: "0.45rem 0.75rem",
+                          padding: chapter.level === 1 ? "0.45rem 0.75rem" : "0.3rem 0.75rem 0.3rem 1.5rem",
                           cursor: "pointer",
-                          backgroundColor: "var(--bg-surface)",
-                          borderTop: "1px solid var(--border-color)",
+                          backgroundColor: chapter.level === 1 ? "var(--bg-surface)" : "transparent",
+                          borderTop: chapter.level === 1 ? "1px solid var(--border-color)" : "none",
+                          borderLeft: chapter.level === 2 ? "2px solid var(--border-color)" : "none",
                           borderBottom: isCollapsed ? "1px solid var(--border-color)" : "none",
                           userSelect: "none",
                         }}
                       >
-                        <span style={{ fontSize: "0.6rem", color: "var(--text-muted)", flexShrink: 0, transition: "transform 0.15s", display: "inline-block", transform: isCollapsed ? "rotate(-90deg)" : "rotate(0)" }}>▼</span>
-                        <span style={{ flex: 1, fontSize: "0.7rem", fontWeight: 700, color: "var(--text-main)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <span style={{
+                          fontSize: "0.55rem", color: "var(--text-muted)", flexShrink: 0,
+                          display: "inline-block", transform: isCollapsed ? "rotate(-90deg)" : "rotate(0)",
+                          transition: "transform 0.15s",
+                        }}>▼</span>
+                        <span style={{
+                          flex: 1,
+                          fontSize: chapter.level === 1 ? "0.7rem" : "0.65rem",
+                          fontWeight: chapter.level === 1 ? 700 : 600,
+                          color: chapter.level === 1 ? "var(--text-main)" : "var(--text-muted)",
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          fontStyle: chapter.level === 2 ? "italic" : "normal",
+                        }}>
                           {chapter.title}
                         </span>
-                        <span style={{ fontSize: "0.6rem", fontWeight: 700, color: "var(--primary)", backgroundColor: "rgba(99,102,241,0.1)", borderRadius: "99px", padding: "0.05rem 0.4rem", flexShrink: 0 }}>
+                        <span style={{
+                          fontSize: "0.6rem", fontWeight: 700, flexShrink: 0,
+                          color: chapter.level === 1 ? "var(--primary)" : "var(--text-muted)",
+                          backgroundColor: chapter.level === 1 ? "rgba(99,102,241,0.1)" : "transparent",
+                          borderRadius: "99px", padding: "0.05rem 0.4rem",
+                        }}>
                           {pendingInChapter > 0 ? `${pendingInChapter} pend.` : `${chapterSuggs.length} ✓`}
                         </span>
                       </div>

@@ -972,7 +972,7 @@ export default function BooksPage() {
 
       {/* ────────────────── UPLOAD MODAL ────────────────── */}
       {isModalOpen && (
-        <div className="modal-overlay">
+        <div className="modal-overlay" style={{ left: 0, right: 0, top: 0, bottom: 0 }}>
           <div className="card fade-in modal-content" style={{ maxWidth: "520px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
               <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--text-main)" }}>Nuevo Manuscrito</h2>
@@ -1044,9 +1044,8 @@ export default function BooksPage() {
                 </label>
                 <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                   {[
-                    { code: "es",    label: "Español",  flag: "🇪🇸", norm: "RAE" },
-                    { code: "ca",    label: "Català",   flag: "🏴", norm: "IEC" },
-                    { code: "en-GB", label: "English",  flag: "🇬🇧", norm: "Style" },
+                    { code: "es", label: "Español", flag: "🇪🇸", norm: "RAE" },
+                    { code: "ca", label: "Català",  flag: "🏴", norm: "IEC" },
                   ].map(lang => (
                     <button
                       key={lang.code}

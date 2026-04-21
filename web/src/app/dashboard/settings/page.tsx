@@ -293,93 +293,105 @@ export default function SettingsPage() {
             Aún no hay miembros. Añade el primero.
           </div>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ borderBottom: "1px solid var(--border-color)" }}>
-                {["Miembro", "Correo", "Rol", ""].map(h => (
-                  <th key={h} style={{ padding: "0.75rem 1.75rem", textAlign: "left", fontSize: "0.75rem", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {members.map((member, i) => {
-                const isMe = member.uid === user?.uid;
-                const canEdit = (role === "SuperAdmin")
-                  || ((role === "Responsable_Editorial")
-                    && member.role !== "SuperAdmin" && member.role !== "Responsable_Editorial");
-                return (
-                  <tr key={member.uid} style={{ borderBottom: i < members.length - 1 ? "1px solid var(--border-color)" : "none", backgroundColor: isMe ? "rgba(99,102,241,0.03)" : "transparent" }}>
-                    <td style={{ padding: "1rem 1.75rem" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                        <div style={{
-                          width: "36px", height: "36px", borderRadius: "50%", flexShrink: 0,
-                          background: `linear-gradient(135deg, ${roleColors[member.role] ?? "var(--primary)"}, #F472B6)`,
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          color: "white", fontWeight: 700, fontSize: "0.875rem",
-                        }}>
-                          {(member.displayName ?? member.email).charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: "0.9rem", color: "var(--text-main)" }}>
-                            {member.displayName ?? "—"}
-                            {isMe && <span style={{ marginLeft: "0.5rem", fontSize: "0.7rem", color: "var(--primary)", fontWeight: 500 }}>Tú</span>}
-                          </div>
-                        </div>
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {members.map((member, i) => {
+              const isMe = member.uid === user?.uid;
+              const canEdit = (role === "SuperAdmin")
+                || ((role === "Responsable_Editorial")
+                  && member.role !== "SuperAdmin" && member.role !== "Responsable_Editorial");
+              return (
+                <div key={member.uid} style={{
+                  borderBottom: i < members.length - 1 ? "1px solid var(--border-color)" : "none",
+                  padding: "0.875rem 1.25rem",
+                  backgroundColor: isMe ? "rgba(99,102,241,0.03)" : "transparent",
+                  display: "flex", flexDirection: "column", gap: "0.625rem",
+                }}>
+                  {/* Fila 1: avatar + nombre + email */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", minWidth: 0 }}>
+                    <div style={{
+                      width: "36px", height: "36px", borderRadius: "50%", flexShrink: 0,
+                      background: `linear-gradient(135deg, ${roleColors[member.role] ?? "var(--primary)"}, #F472B6)`,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      color: "white", fontWeight: 700, fontSize: "0.875rem",
+                    }}>
+                      {(member.displayName ?? member.email).charAt(0).toUpperCase()}
+                    </div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontWeight: 600, fontSize: "0.9rem", color: "var(--text-main)", display: "flex", alignItems: "center", gap: "0.375rem", flexWrap: "wrap" }}>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {member.displayName ?? "—"}
+                        </span>
+                        {isMe && <span style={{ fontSize: "0.7rem", color: "var(--primary)", fontWeight: 500, flexShrink: 0 }}>Tú</span>}
                       </div>
-                    </td>
-                    <td style={{ padding: "1rem 1.75rem", fontSize: "0.875rem", color: "var(--text-muted)" }}>{member.email}</td>
-                    <td style={{ padding: "1rem 1.75rem" }}>
+                      <div style={{ fontSize: "0.775rem", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {member.email}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Fila 2: selector de rol (izquierda) + acciones (derecha) */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
+                    <div style={{ flexShrink: 0 }}>
                       {canEdit && !isMe ? (
                         <div style={{ position: "relative", display: "inline-block" }}>
                           <select value={member.role} disabled={updatingUid === member.uid}
                             onChange={e => handleRoleChange(member.uid, e.target.value as Role)}
                             style={{
-                              appearance: "none", cursor: "pointer", padding: "0.375rem 2rem 0.375rem 0.75rem",
-                              borderRadius: "var(--radius-md)", fontSize: "0.8125rem", fontWeight: 600,
-                              border: "1px solid var(--border-color)", backgroundColor: "var(--card-bg)",
+                              appearance: "none", cursor: "pointer", padding: "0.3rem 1.75rem 0.3rem 0.625rem",
+                              borderRadius: "var(--radius-md)", fontSize: "0.8rem", fontWeight: 600,
+                              border: `1px solid ${roleColors[member.role] ?? "var(--border-color)"}`,
+                              backgroundColor: "var(--card-bg)",
                               color: roleColors[member.role] ?? "var(--text-main)",
                               opacity: updatingUid === member.uid ? 0.5 : 1,
                             }}>
                             {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                           </select>
-                          <ChevronDown size={12} style={{ position: "absolute", right: "0.5rem", top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--text-muted)" }} />
+                          <ChevronDown size={11} style={{ position: "absolute", right: "0.4rem", top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--text-muted)" }} />
                         </div>
                       ) : (
-                        <span style={{ fontSize: "0.8125rem", fontWeight: 600, color: roleColors[member.role] ?? "var(--text-muted)" }}>
+                        <span style={{
+                          display: "inline-flex", alignItems: "center", gap: "0.3rem",
+                          fontSize: "0.8rem", fontWeight: 600,
+                          color: roleColors[member.role] ?? "var(--text-muted)",
+                          padding: "0.25rem 0.625rem",
+                          backgroundColor: member.role === "SuperAdmin" ? "rgba(168,85,247,0.1)" : "var(--bg-color)",
+                          borderRadius: "99px",
+                          border: `1px solid ${member.role === "SuperAdmin" ? "rgba(168,85,247,0.25)" : "var(--border-color)"}`,
+                        }}>
+                          {member.role === "SuperAdmin" && <Shield size={11} />}
                           {ROLES.find(r => r.value === member.role)?.label ?? member.role}
                         </span>
                       )}
-                    </td>
-                    <td style={{ padding: "1rem 1.75rem", textAlign: "right" }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.5rem" }}>
-                        {realRole === "SuperAdmin" && !impersonated && !isMe && (
-                          <button title={`Ver como ${member.displayName ?? member.email}`} onClick={() => handleImpersonate(member)}
-                            className="btn btn-secondary" style={{ padding: "0.35rem 0.75rem", fontSize: "0.75rem", display: "flex", alignItems: "center", gap: "0.375rem" }}>
-                            <Eye size={13} /> Ver como
-                          </button>
-                        )}
-                        {canEdit && !isMe && (
-                          <button title={`Eliminar a ${member.displayName ?? member.email}`}
-                            disabled={updatingUid === member.uid}
-                            onClick={() => handleDeleteUser(member.uid, member.displayName ?? member.email)}
-                            style={{
-                              background: "none", border: "1px solid transparent", cursor: "pointer",
-                              color: "var(--text-muted)", padding: "0.35rem 0.5rem", borderRadius: "var(--radius-sm)",
-                              display: "flex", alignItems: "center", transition: "all 0.15s",
-                              opacity: updatingUid === member.uid ? 0.4 : 1,
-                            }}
-                            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(239,68,68,0.4)"; (e.currentTarget as HTMLButtonElement).style.color = "var(--danger)"; (e.currentTarget as HTMLButtonElement).style.backgroundColor = "rgba(239,68,68,0.06)"; }}
-                            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "transparent"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-muted)"; (e.currentTarget as HTMLButtonElement).style.backgroundColor = "transparent"; }}>
-                            <Trash2 size={15} />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexShrink: 0 }}>
+                      {realRole === "SuperAdmin" && !impersonated && !isMe && (
+                        <button title={`Ver como ${member.displayName ?? member.email}`} onClick={() => handleImpersonate(member)}
+                          className="btn btn-secondary" style={{ padding: "0.3rem 0.625rem", fontSize: "0.75rem", display: "flex", alignItems: "center", gap: "0.3rem" }}>
+                          <Eye size={12} /> Ver como
+                        </button>
+                      )}
+                      {canEdit && !isMe && (
+                        <button title={`Eliminar a ${member.displayName ?? member.email}`}
+                          disabled={updatingUid === member.uid}
+                          onClick={() => handleDeleteUser(member.uid, member.displayName ?? member.email)}
+                          style={{
+                            background: "none", border: "1px solid transparent", cursor: "pointer",
+                            color: "var(--text-muted)", padding: "0.3rem 0.45rem", borderRadius: "var(--radius-sm)",
+                            display: "flex", alignItems: "center", transition: "all 0.15s",
+                            opacity: updatingUid === member.uid ? 0.4 : 1,
+                          }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(239,68,68,0.4)"; (e.currentTarget as HTMLButtonElement).style.color = "var(--danger)"; (e.currentTarget as HTMLButtonElement).style.backgroundColor = "rgba(239,68,68,0.06)"; }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "transparent"; (e.currentTarget as HTMLButtonElement).style.color = "var(--text-muted)"; (e.currentTarget as HTMLButtonElement).style.backgroundColor = "transparent"; }}>
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
       <div style={{ marginTop: "1.5rem", padding: "1rem 1.25rem", backgroundColor: "rgba(99,102,241,0.06)", borderRadius: "var(--radius-md)", borderLeft: "3px solid var(--primary)", fontSize: "0.8125rem", color: "var(--text-muted)", lineHeight: 1.6 }}>

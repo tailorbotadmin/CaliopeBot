@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useAuth } from "@/lib/auth-context";
 import {
   getBooksByOrganization, getOrganizations, createBook,
@@ -924,7 +925,7 @@ export default function BooksPage() {
       )}
 
       {/* ────────────────── DELETE CONFIRMATION MODAL ────────────────── */}
-      {deleteTarget && (
+      {deleteTarget && createPortal(
         <div className="modal-overlay">
           <div className="card fade-in modal-content" style={{ maxWidth: "440px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "1.25rem" }}>
@@ -968,11 +969,11 @@ export default function BooksPage() {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
       {/* ────────────────── UPLOAD MODAL ────────────────── */}
-      {isModalOpen && (
-        <div className="modal-overlay" style={{ left: 0, right: 0, top: 0, bottom: 0 }}>
+      {isModalOpen && createPortal(
+        <div className="modal-overlay">
           <div className="card fade-in modal-content" style={{ maxWidth: "520px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
               <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--text-main)" }}>Nuevo Manuscrito</h2>
@@ -1186,7 +1187,7 @@ export default function BooksPage() {
             </form>
           </div>
         </div>
-      )}
+      , document.body)}
     </div>
   );
 }

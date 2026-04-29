@@ -9,10 +9,16 @@ import re
 import json
 import uuid
 import logging
+import smtplib
+from datetime import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-from typing import List, Dict
+from typing import List, Dict, Optional
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import language_tool_python
@@ -89,6 +95,14 @@ try:
 except Exception as e:
     logger.warning(f"Gemini client init failed: {e}")
     client = None
+
+
+# ==========================================
+# EMAIL CONFIG (feedback → xavi@tailorbot.tech)
+# ==========================================
+_FEEDBACK_RECIPIENT = "xavi@tailorbot.tech"
+_GMAIL_USER         = os.getenv("GMAIL_USER", "")         # e.g. noreply@tailorbot.tech
+_GMAIL_APP_PASS     = os.getenv("GMAIL_APP_PASSWORD", "") # Google Workspace App Password
 
 
 # ==========================================
@@ -316,9 +330,111 @@ class CreateUserRequest(BaseModel):
     role: str
     organizationId: str
 
+
+# ==========================================
+# FEEDBACK / SUPPORT ENDPOINT
+# ==========================================
+
+@app.post("/api/v1/feedback")
+async def submit_feedback(
+    raw_req: Request,
+    message:      str = Form(...),
+    subject:      str = Form(default="Feedback CalíopeBot"),
+    sender_name:  str = Form(default=""),
+    sender_email: str = Form(default=""),
+    org_name:     str = Form(default=""),
+    page_url:     str = Form(default=""),
+    screenshots:  List[UploadFile] = File(default=[]),
+):
+    """Collect user feedback with optional screenshot attachments.
+    Stores a record in Firestore and emails xavi@tailorbot.tech.
+    Authentication is optional — public endpoint so any logged-in user can report.
+    """
+    # Best-effort auth to capture uid/role for the Firestore record
+    uid = ""
+    auth_header = raw_req.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            from firebase_admin import auth as _fauth
+            decoded = _fauth.verify_id_token(auth_header.split("Bearer ")[1])
+            uid = decoded.get("uid", "")
+        except Exception:
+            pass
+
+    # ── Store in Firestore (always) ─────────────────────────────────────────
+    feedback_doc = db.collection("feedback").document()
+    feedback_doc.set({
+        "message":     message,
+        "subject":     subject,
+        "senderName":  sender_name,
+        "senderEmail": sender_email,
+        "orgName":     org_name,
+        "pageUrl":     page_url,
+        "uid":         uid,
+        "screenshotCount": len(screenshots),
+        "timestamp":   firestore.SERVER_TIMESTAMP,
+    })
+    feedback_id = feedback_doc.id
+    logger.info(f"Feedback stored: id={feedback_id} from={sender_email}")
+
+    # ── Send email if SMTP credentials are configured ───────────────────────
+    if _GMAIL_USER and _GMAIL_APP_PASS:
+        try:
+            msg = MIMEMultipart("mixed")
+            msg["From"]     = f"CalíopeBot Soporte <{_GMAIL_USER}>"
+            msg["To"]       = _FEEDBACK_RECIPIENT
+            msg["Subject"]  = f"[CalíopeBot] {subject}"
+            msg["Reply-To"] = sender_email or _GMAIL_USER
+
+            now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+            body = (
+                f"📨 Nuevo feedback de CalíopeBot\n"
+                f"═══════════════════════════════\n"
+                f"De: {sender_name} <{sender_email}>\n"
+                f"Organización: {org_name}\n"
+                f"Página: {page_url}\n"
+                f"Fecha: {now_str}\n"
+                f"═══════════════════════════════\n\n"
+                f"{message}\n\n"
+                f"───────────────────────────────\n"
+                f"Feedback ID: {feedback_id}\n"
+                f"Capturas adjuntas: {len(screenshots)}\n"
+            )
+            msg.attach(MIMEText(body, "plain", "utf-8"))
+
+            # Attach screenshots (read content once)
+            for f_up in screenshots:
+                content = await f_up.read()
+                if not content:
+                    continue
+                part = MIMEBase("application", "octet-stream")
+                part.set_payload(content)
+                encoders.encode_base64(part)
+                safe_name = re.sub(r'[^\w.\-]', '_', f_up.filename or "screenshot.png")
+                part.add_header("Content-Disposition", f'attachment; filename="{safe_name}"')
+                msg.attach(part)
+
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as srv:
+                srv.login(_GMAIL_USER, _GMAIL_APP_PASS)
+                srv.sendmail(_GMAIL_USER, _FEEDBACK_RECIPIENT, msg.as_string())
+
+            logger.info(f"Feedback email sent: id={feedback_id}")
+        except Exception as mail_err:
+            # Non-fatal: feedback is already in Firestore
+            logger.error(f"Feedback email failed (non-fatal): {mail_err}")
+    else:
+        logger.warning("GMAIL_USER/GMAIL_APP_PASSWORD not set — feedback stored in Firestore only")
+
+    return {"status": "ok", "feedbackId": feedback_id}
+
 # ==========================================
 # ENDPOINTS
 # ==========================================
+
+@app.get("/api/v1/health")
+def health():
+    return {"status": "ok"}
+
 
 @app.get("/")
 def health_check():

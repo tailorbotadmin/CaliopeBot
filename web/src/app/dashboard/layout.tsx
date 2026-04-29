@@ -7,6 +7,7 @@ import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { subscribeNotifications } from "@/lib/firestore";
 import Link from "next/link";
+import FeedbackWidget from "@/components/FeedbackWidget";
 import {
   LayoutDashboard,
   FileCheck,
@@ -217,6 +218,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {children}
         </main>
       </div>
+
+      {/* ── FEEDBACK WIDGET (visible on all pages) ── */}
+      <FeedbackWidget />
     </div>
   );
 }

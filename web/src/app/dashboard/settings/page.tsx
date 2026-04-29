@@ -4,12 +4,13 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { auth } from "@/lib/firebase";
+import { sendPasswordResetEmail } from "firebase/auth";
 import { getOrgUsers, UserProfile, Role, getOrganizations, Organization } from "@/lib/firestore";
 import { db } from "@/lib/firebase";
 import { doc, deleteDoc, collection, getDocs } from "firebase/firestore";
 import {
   UserPlus, Users, ChevronDown, Trash2, RefreshCw, Eye, Shield,
-  AlertTriangle, BookOpen, CreditCard, Building2,
+  AlertTriangle, BookOpen, CreditCard, Building2, Mail,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -46,6 +47,7 @@ export default function SettingsPage() {
   const [formData, setFormData] = useState({ name: "", email: "", password: "", role: "Autor" as Role });
   const [creating, setCreating] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [sendingResetUid, setSendingResetUid] = useState<string | null>(null);
 
   // SuperAdmin state
   const [allOrgs, setAllOrgs] = useState<Organization[]>([]);
@@ -142,6 +144,18 @@ export default function SettingsPage() {
       setMessage({ type: "error", text: "Error eliminando organización: " + (err instanceof Error ? err.message : String(err)) });
     } finally {
       setDeletingOrg(false);
+    }
+  };
+
+  const handleSendResetLink = async (email: string, uid: string) => {
+    setSendingResetUid(uid);
+    try {
+      await sendPasswordResetEmail(auth, email);
+      setMessage({ type: "success", text: `✉️ Enlace de acceso enviado a ${email}. El usuario puede hacer clic en él para establecer su contraseña.` });
+    } catch (err) {
+      setMessage({ type: "error", text: "Error al enviar el enlace: " + (err instanceof Error ? err.message : String(err)) });
+    } finally {
+      setSendingResetUid(null);
     }
   };
 
@@ -365,6 +379,20 @@ export default function SettingsPage() {
                     </div>
 
                     <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexShrink: 0 }}>
+                      {/* Enviar enlace de acceso/reset — visible para admins sobre usuarios que pueden editar */}
+                      {canEdit && !isMe && (
+                        <button
+                          title={`Enviar enlace de acceso a ${member.email}`}
+                          disabled={sendingResetUid === member.uid}
+                          onClick={() => handleSendResetLink(member.email, member.uid)}
+                          className="btn btn-secondary"
+                          style={{ padding: "0.3rem 0.625rem", fontSize: "0.75rem", display: "flex", alignItems: "center", gap: "0.3rem", opacity: sendingResetUid === member.uid ? 0.5 : 1 }}>
+                          {sendingResetUid === member.uid
+                            ? <RefreshCw size={12} style={{ animation: "spin 1s linear infinite" }} />
+                            : <Mail size={12} />}
+                          Enlace acceso
+                        </button>
+                      )}
                       {realRole === "SuperAdmin" && !impersonated && !isMe && (
                         <button title={`Ver como ${member.displayName ?? member.email}`} onClick={() => handleImpersonate(member)}
                           className="btn btn-secondary" style={{ padding: "0.3rem 0.625rem", fontSize: "0.75rem", display: "flex", alignItems: "center", gap: "0.3rem" }}>

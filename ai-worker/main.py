@@ -577,7 +577,7 @@ async def process_book_background(org_id: str, book_id: str, author_id: str):
             book_ref.update({"status": "review_editor", "processedChunks": 0})
             return
 
-        processed_count = 0
+        processed_count = book_data.get("processedChunks", 0)  # resume from existing count (smart retry)
 
         for chunk in pending:
             data = chunk.to_dict()
@@ -822,33 +822,51 @@ async def retry_book(request: RetryBookRequest, background_tasks: BackgroundTask
             detail="no_chunks:El manuscrito no tiene segmentos. Usa 'Reintentar' desde la lista de manuscritos para volver a subirlo."
         )
 
-    # ── Reset ALL chunks to pending and re-run (always) ──────────────────
-    # We never short-circuit — even if chunks are "processed", they may have
-    # empty suggestions (silent failure). Always re-run when retry is forced.
+    # ── Smart retry: only reset chunks that are still pending OR have no suggestions ──
+    # Chunks that were already successfully processed (status=processed AND suggestions exist)
+    # are preserved so the pipeline resumes from where it was killed (e.g. after a Cloud Run redeploy).
+    truly_done = [
+        c for c in all_chunks
+        if c.to_dict().get("status") == "processed"
+        and len(c.to_dict().get("suggestions") or []) > 0
+    ]
+    to_reset = [c for c in all_chunks if c not in truly_done]
+    done_count = len(truly_done)
+
     batch_size = 450
-    for i in range(0, len(all_chunks), batch_size):
+    for i in range(0, len(to_reset), batch_size):
         batch = db.batch()
-        for c in all_chunks[i:i + batch_size]:
+        for c in to_reset[i:i + batch_size]:
             batch.update(chunks_ref.document(c.id), {"status": "pending", "suggestions": []})
         batch.commit()
 
-    # Reset book state and clear voiceProfile so it's regenerated
-    book_ref.update({
+
+    # Reset book state — keep voiceProfile if partially done (avoid regenerating it)
+    book_snap_dict = book_snap.to_dict() or {}
+    update_data: dict = {
         "status": "processing",
-        "processedChunks": 0,
+        "processedChunks": done_count,  # resume counter from preserved chunks
         "totalChunks": total,
-        "voiceProfile": None,
-    })
+    }
+    if done_count == 0:
+        update_data["voiceProfile"] = None  # force regeneration only when starting fresh
+    book_ref.update(update_data)
 
     background_tasks.add_task(process_book_background, org_id, book_id, author_id)
-    logger.info(f"Retry triggered: book={book_id}, total={total} chunks reset to pending")
+    pending_count = len(to_reset)
+    logger.info(
+        f"Smart retry: book={book_id}, {done_count} chunks preserved, "
+        f"{pending_count} chunks reset to pending"
+    )
 
     return {
         "status": "retrying",
         "bookId": book_id,
         "totalChunks": total,
-        "pendingChunks": total,
+        "pendingChunks": pending_count,
+        "preservedChunks": done_count,
     }
+
 
 
 @app.post("/api/v1/ingest-book")

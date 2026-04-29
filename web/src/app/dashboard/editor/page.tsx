@@ -84,6 +84,13 @@ function detectChapterLevel(chunk: Chunk): 0 | 1 | 2 {
   if (style.includes("heading") || style.includes("título") || style.includes("titulo")) return 1;
 
   const text = chunk.text.trim();
+
+  // Level 1: Verbal chapter/section markers ("Capítulo II: ...", "Parte 1", "Prólogo", etc.)
+  if (
+    text.length <= 160 &&
+    /^(cap[íi]tulo|cap[íi]tol|chapter|parte|part[e\s]|pr[oó]logo|prologue|ep[íi]logo|epilogue|ap[eé]ndice|appendix|introducci[oó]n|introduction|conclusi[oó]n|conclusion|prefacio|foreword|coda|interludi[oa]|nota\s+del?\s+autor[a]?)\b/i.test(text)
+  ) return 1;
+
   // Level 1: "1 Título", "2. Otro Título" (single number, short)
   if (text.length <= 120 && /^\d+[\s\.]+[A-ZÁÉÍÓÚÑÜ]/u.test(text) && !/^\d+\.\d/.test(text)) return 1;
   // Level 2: "1.1 Subtítulo", "1.1. Sub", "a) Apartado"
@@ -730,66 +737,102 @@ export default function EditorPage() {
         borderRight: "1px solid var(--border-color)", minWidth: 0, overflow: "hidden",
       }}>
 
-        {/* Header */}
+        {/* Header — ROW 1: breadcrumb + title │ action buttons */}
         <header className="editor-header">
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.3rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.75rem" }}>
+            {/* Left: breadcrumb + title */}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 0, flex: 1, overflow: "hidden" }}>
               <button className="btn-ghost" onClick={() => router.push("/dashboard/books")}
-                style={{ padding: "0.25rem 0.5rem", fontSize: "0.8125rem", display: "flex", alignItems: "center", gap: "0.25rem", color: "var(--text-muted)" }}>
+                style={{ padding: "0.25rem 0.5rem", fontSize: "0.8125rem", display: "flex", alignItems: "center", gap: "0.25rem", color: "var(--text-muted)", flexShrink: 0 }}>
                 <ArrowLeft size={14} /> Biblioteca
               </button>
-              <span style={{ color: "var(--border-color)" }}>/</span>
+              <span style={{ color: "var(--border-color)", flexShrink: 0 }}>/</span>
               <h1 className="editor-title" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {bookTitle || "Manuscrito"}
+                {(bookTitle || "Manuscrito").replace(/_/g, " ")}
               </h1>
             </div>
-            {/* Progress bars */}
-            <div style={{ display: "flex", gap: "1.25rem", alignItems: "center" }}>
-              {totalChunks > 0 && (
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                  <div style={{ width: "100px", height: "3px", backgroundColor: "var(--border-color)", borderRadius: "2px", overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: `${analysisPct}%`, backgroundColor: analysisPct === 100 ? "var(--success)" : "var(--primary)", transition: "width 0.5s ease" }} />
-                  </div>
-                  <span className="editor-stats" style={{ color: analysisPct === 100 ? "var(--success)" : undefined }}>Análisis {analysisPct}%</span>
-                </div>
-              )}
-              {allSuggestions.length > 0 && (
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                  <div style={{ width: "100px", height: "3px", backgroundColor: "var(--border-color)", borderRadius: "2px", overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: `${reviewPct}%`, backgroundColor: reviewPct === 100 ? "var(--success)" : "#f59e0b", transition: "width 0.4s ease" }} />
-                  </div>
-                  <span className="editor-stats" style={{ color: reviewPct === 100 ? "var(--success)" : undefined }}>Revisión {reviewPct}%</span>
-                </div>
-              )}
-              {isAnalyzing && <span style={{ fontSize: "0.75rem", color: "var(--primary)", display: "flex", alignItems: "center", gap: "0.25rem" }}>
-                <Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} /> Analizando
-              </span>}
-              {/* Editorial profile badges */}
-              {editorialAnalysis?.tipo_texto && (
-                <button
-                  onClick={() => setShowEditorialPanel(v => !v)}
-                  title="Análisis editorial — clic para ver detalles"
-                  style={{
-                    display: "flex", alignItems: "center", gap: "0.3rem",
-                    background: "none", border: "1px solid var(--border-color)", borderRadius: "99px",
-                    padding: "0.15rem 0.55rem", cursor: "pointer",
-                    fontSize: "0.65rem", fontWeight: 700, color: "var(--text-muted)",
-                    transition: "all 0.15s",
-                  }}
-                >
-                  📋 {editorialAnalysis.tipo_texto?.replace(/-/g, " ")}
-                  {editorialAnalysis.registro && (
-                    <span style={{ color: "var(--primary)", borderLeft: "1px solid var(--border-color)", paddingLeft: "0.35rem" }}>
-                      {editorialAnalysis.registro?.replace(/-/g, " ")}
-                    </span>
-                  )}
-                  {(editorialAnalysis.riesgos_editoriales?.length ?? 0) > 0 && (
-                    <span style={{ color: "#ef4444", marginLeft: "0.2rem" }}>⚠️</span>
-                  )}
-                </button>
-              )}
+            {/* Right: action buttons — always on one row */}
+            <div className="editor-actions">
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowAnnotations(v => !v)}
+                style={{ fontSize: "0.75rem", padding: "0.35rem 0.65rem", whiteSpace: "nowrap" }}
+              >
+                {showAnnotations ? "Ocultar marcas" : "Mostrar marcas"}
+              </button>
+              {canManage() && (() => {
+                const pendingCount = allSuggestions.filter(s => s.status === "pending").length;
+                const allResolved = pendingCount === 0 && allSuggestions.length > 0;
+                return (
+                  <button
+                    className="btn"
+                    style={{ whiteSpace: "nowrap", opacity: allResolved ? 1 : 0.45, cursor: allResolved ? "pointer" : "not-allowed" }}
+                    onClick={allResolved ? handleNextPhase : undefined}
+                    title={allResolved ? "Cerrar fase de revisión" : `Faltan ${pendingCount} correcciones por revisar`}
+                  >
+                    Cerrar Fase ✓{!allResolved && ` (${pendingCount})`}
+                  </button>
+                );
+              })()}
+              <button className="btn" onClick={handleDownload}
+                title="Descargar manuscrito corregido"
+                style={{ backgroundColor: "var(--success)", display: "flex", alignItems: "center", gap: "0.375rem", flexShrink: 0 }}>
+                <Download size={14} /> Descargar
+              </button>
+              <button className="btn-ghost" onClick={() => setPanelCollapsed(v => !v)}
+                style={{ padding: "0.35rem", display: "flex", alignItems: "center", flexShrink: 0 }}
+                title={panelCollapsed ? "Mostrar panel correcciones" : "Ocultar panel correcciones"}>
+                {panelCollapsed ? <PanelRightOpen size={18} /> : <PanelRightClose size={18} />}
+              </button>
             </div>
           </div>
+
+          {/* Header — ROW 2: progress bars + spinner + editorial badge */}
+          <div style={{ display: "flex", gap: "1.25rem", alignItems: "center", marginTop: "0.35rem", flexWrap: "wrap" }}>
+            {totalChunks > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <div style={{ width: "100px", height: "3px", backgroundColor: "var(--border-color)", borderRadius: "2px", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${analysisPct}%`, backgroundColor: analysisPct === 100 ? "var(--success)" : "var(--primary)", transition: "width 0.5s ease" }} />
+                </div>
+                <span className="editor-stats" style={{ color: analysisPct === 100 ? "var(--success)" : undefined }}>Análisis {analysisPct}%</span>
+              </div>
+            )}
+            {allSuggestions.length > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <div style={{ width: "100px", height: "3px", backgroundColor: "var(--border-color)", borderRadius: "2px", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${reviewPct}%`, backgroundColor: reviewPct === 100 ? "var(--success)" : "#f59e0b", transition: "width 0.4s ease" }} />
+                </div>
+                <span className="editor-stats" style={{ color: reviewPct === 100 ? "var(--success)" : undefined }}>Revisión {reviewPct}%</span>
+              </div>
+            )}
+            {isAnalyzing && <span style={{ fontSize: "0.75rem", color: "var(--primary)", display: "flex", alignItems: "center", gap: "0.25rem" }}>
+              <Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} /> Analizando
+            </span>}
+            {editorialAnalysis?.tipo_texto && (
+              <button
+                onClick={() => setShowEditorialPanel(v => !v)}
+                title="Análisis editorial — clic para ver detalles"
+                style={{
+                  display: "flex", alignItems: "center", gap: "0.3rem",
+                  background: "none", border: "1px solid var(--border-color)", borderRadius: "99px",
+                  padding: "0.15rem 0.55rem", cursor: "pointer",
+                  fontSize: "0.65rem", fontWeight: 700, color: "var(--text-muted)",
+                  transition: "all 0.15s",
+                }}
+              >
+                📋 {editorialAnalysis.tipo_texto?.replace(/-/g, " ")}
+                {editorialAnalysis.registro && (
+                  <span style={{ color: "var(--primary)", borderLeft: "1px solid var(--border-color)", paddingLeft: "0.35rem" }}>
+                    {editorialAnalysis.registro?.replace(/-/g, " ")}
+                  </span>
+                )}
+                {(editorialAnalysis.riesgos_editoriales?.length ?? 0) > 0 && (
+                  <span style={{ color: "#ef4444", marginLeft: "0.2rem" }}>⚠️</span>
+                )}
+              </button>
+            )}
+          </div>
+
           {/* ── Editorial Analysis Panel (collapsible) ── */}
           {showEditorialPanel && editorialAnalysis && (
             <div style={{
@@ -798,8 +841,8 @@ export default function EditorPage() {
               borderTop: "1px solid var(--border-color)",
               display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "0.75rem",
               fontSize: "0.72rem",
+              marginTop: "0.5rem",
             }}>
-              {/* Metadata row */}
               <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", gridColumn: "1 / -1" }}>
                 {[
                   { label: "Tipo", value: editorialAnalysis.tipo_texto },
@@ -816,29 +859,22 @@ export default function EditorPage() {
                   </span>
                 ) : null)}
               </div>
-              {/* Decisiones autorales */}
               {(editorialAnalysis.decisiones_autorales?.length ?? 0) > 0 && (
                 <div>
-                  <div style={{ fontWeight: 700, color: "#10b981", marginBottom: "0.3rem" }}>
-                    ✅ Decisiones autorales (no corregir)
-                  </div>
+                  <div style={{ fontWeight: 700, color: "#10b981", marginBottom: "0.3rem" }}>✅ Decisiones autorales (no corregir)</div>
                   <ul style={{ margin: 0, paddingLeft: "1.2em", color: "var(--text-muted)", lineHeight: 1.7 }}>
                     {editorialAnalysis.decisiones_autorales?.map((d, i) => <li key={i}>{d}</li>)}
                   </ul>
                 </div>
               )}
-              {/* Riesgos editoriales */}
               {(editorialAnalysis.riesgos_editoriales?.length ?? 0) > 0 && (
                 <div>
-                  <div style={{ fontWeight: 700, color: "#ef4444", marginBottom: "0.3rem" }}>
-                    ⚠️ Riesgos editoriales
-                  </div>
+                  <div style={{ fontWeight: 700, color: "#ef4444", marginBottom: "0.3rem" }}>⚠️ Riesgos editoriales</div>
                   <ul style={{ margin: 0, paddingLeft: "1.2em", color: "var(--text-muted)", lineHeight: 1.7 }}>
                     {editorialAnalysis.riesgos_editoriales?.map((r, i) => <li key={i}>{r}</li>)}
                   </ul>
                 </div>
               )}
-              {/* Rasgos clave */}
               {(editorialAnalysis.rasgos_clave?.length ?? 0) > 0 && (
                 <div style={{ gridColumn: "1 / -1" }}>
                   <div style={{ fontWeight: 700, color: "var(--text-muted)", marginBottom: "0.3rem" }}>Rasgos de estilo</div>
@@ -855,43 +891,8 @@ export default function EditorPage() {
               )}
             </div>
           )}
-
-          <div className="editor-actions">
-            {/* Annotation toggle */}
-            <button
-              className="btn btn-secondary"
-              onClick={() => setShowAnnotations(v => !v)}
-              style={{ fontSize: "0.75rem", padding: "0.35rem 0.65rem" }}
-            >
-              {showAnnotations ? "Ocultar marcas" : "Mostrar marcas"}
-            </button>
-            {canManage() && (() => {
-              const pendingCount = allSuggestions.filter(s => s.status === "pending").length;
-              const allResolved = pendingCount === 0 && allSuggestions.length > 0;
-              return (
-                <button
-                  className="btn"
-                  style={{ whiteSpace: "nowrap", opacity: allResolved ? 1 : 0.45, cursor: allResolved ? "pointer" : "not-allowed" }}
-                  onClick={allResolved ? handleNextPhase : undefined}
-                  title={allResolved ? "Cerrar fase de revisión" : `Faltan ${pendingCount} correcciones por revisar`}
-                >
-                  Cerrar Fase ✓{!allResolved && ` (${pendingCount} pendientes)`}
-                </button>
-              );
-            })()}
-            <button className="btn" onClick={handleDownload}
-              title="Descargar manuscrito corregido"
-              style={{ backgroundColor: "var(--success)", display: "flex", alignItems: "center", gap: "0.375rem", flexShrink: 0 }}>
-              <Download size={14} /> Descargar
-            </button>
-            {/* Panel toggle */}
-            <button className="btn-ghost" onClick={() => setPanelCollapsed(v => !v)}
-              style={{ padding: "0.35rem", display: "flex", alignItems: "center" }}
-              title={panelCollapsed ? "Mostrar panel correcciones" : "Ocultar panel correcciones"}>
-              {panelCollapsed ? <PanelRightOpen size={18} /> : <PanelRightClose size={18} />}
-            </button>
-          </div>
         </header>
+
 
         {/* Analysis banner */}
         {isAnalyzing && (

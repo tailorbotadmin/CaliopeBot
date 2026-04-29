@@ -530,7 +530,11 @@ export default function BooksPage() {
           );
           const ok = await triggerIngestion(createdBookId, selectedOrgId, downloadURL, effectiveAuthorId, selectedLanguage);
           if (ok) {
-            await updateBookStatus(selectedOrgId, createdBookId, "processing");
+            // NOTE: do NOT call updateBookStatus here — the AI worker already sets
+            // the book to "processing" during ingest-book, and will set it to
+            // "review_editor" when processing is complete. Overwriting it here
+            // would race with the background task and could freeze the book in
+            // "processing" state indefinitely if the worker finishes before this call.
             // Notify Responsables Editoriales
             try {
               await notifyResponsables(selectedOrgId, {

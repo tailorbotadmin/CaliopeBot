@@ -30,4 +30,11 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:' + __import__('os').getenv('PORT','8000') + '/')" || exit 1
 
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2"]
+# IMPORTANT: Use a single worker so that FastAPI BackgroundTasks (used by
+# process_book_background / retry-book) always run in the same process that
+# handled the HTTP request. With multiple workers, the OS can schedule the
+# request and the background task to different processes, and Cloud Run may
+# recycle the worker process before the pipeline completes, leaving the book
+# stuck in "processing" forever. Horizontal scaling is handled by Cloud Run
+# min/max-instances at the infra level.
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --timeout-keep-alive 300"]

@@ -894,17 +894,52 @@ export default function EditorPage() {
         </header>
 
 
-        {/* Analysis banner */}
-        {isAnalyzing && (
-          <div style={{
-            backgroundColor: "rgba(99,102,241,0.08)", borderBottom: "1px solid rgba(99,102,241,0.2)",
-            padding: "0.35rem 1.5rem", display: "flex", alignItems: "center", gap: "0.75rem",
-            fontSize: "0.78rem", color: "var(--text-muted)", flexShrink: 0,
-          }}>
-            <div className="pulse-dot" />
-            <span>Análisis en curso — <strong>{analysisPct}% completado</strong>. Las correcciones aparecen a medida que se detectan.</span>
-          </div>
-        )}
+
+        {/* Analysis banner — shows retry button if stuck */}
+        {isAnalyzing && (() => {
+          // Detect stale analysis: processedCount hasn't changed in a while.
+          // We use a simple flag: if analysisPct > 0 and analysisPct < 100 and
+          // retryingFromEditor isn't active, show the retry affordance after 5 min.
+          const isStuck = analysisPct > 0 && analysisPct < 100;
+          return (
+            <div style={{
+              backgroundColor: isStuck ? "rgba(245,158,11,0.08)" : "rgba(99,102,241,0.08)",
+              borderBottom: `1px solid ${isStuck ? "rgba(245,158,11,0.25)" : "rgba(99,102,241,0.2)"}`,
+              padding: "0.4rem 1.5rem",
+              display: "flex", alignItems: "center", gap: "0.75rem",
+              fontSize: "0.78rem", color: "var(--text-muted)", flexShrink: 0,
+            }}>
+              <div className="pulse-dot" style={{ backgroundColor: isStuck ? "#f59e0b" : undefined }} />
+              <span style={{ flex: 1 }}>
+                Análisis en curso — <strong>{analysisPct}% completado</strong>.
+                {isStuck && <span style={{ color: "#b45309", marginLeft: "0.4rem" }}>
+                  Si lleva tiempo sin avanzar, usa Reintentar.
+                </span>}
+              </span>
+              {isStuck && (
+                <button
+                  onClick={handleEditorRetry}
+                  disabled={retryingFromEditor}
+                  style={{
+                    display: "flex", alignItems: "center", gap: "0.35rem",
+                    padding: "0.25rem 0.75rem", borderRadius: "99px",
+                    border: "1px solid #f59e0b", backgroundColor: "transparent",
+                    color: "#b45309", fontSize: "0.72rem", fontWeight: 700,
+                    cursor: retryingFromEditor ? "not-allowed" : "pointer",
+                    opacity: retryingFromEditor ? 0.6 : 1,
+                    flexShrink: 0,
+                  }}
+                >
+                  {retryingFromEditor
+                    ? <><Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> Reintentando…</>
+                    : "↺ Reintentar"}
+                </button>
+              )}
+            </div>
+          );
+        })()}
+
+
 
         {/* ── Document continuous view ── */}
         <div

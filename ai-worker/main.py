@@ -254,10 +254,61 @@ _bootstrap_rag_from_firestore()
 # ==========================================
 # FASTAPI APP
 # ==========================================
+import asyncio
+from contextlib import asynccontextmanager
+
+async def _resume_stuck_books():
+    """On every Cloud Run startup: find books stuck in 'processing' and requeue them.
+    This auto-heals from redeploys that killed in-flight background tasks."""
+    await asyncio.sleep(5)  # let Firebase + Gemini init settle
+    try:
+        orgs = list(db.collection("organizations").stream())
+        for org in orgs:
+            stuck = list(
+                org.reference.collection("books")
+                .where("status", "==", "processing")
+                .stream()
+            )
+            for book_snap in stuck:
+                book_id  = book_snap.id
+                book_data = book_snap.to_dict() or {}
+                org_id   = org.id
+                author_id = book_data.get("authorId", "")
+
+                chunks_ref = org.reference.collection("books").document(book_id).collection("chunks")
+                pending = [c for c in chunks_ref.stream() if c.to_dict().get("status") == "pending"]
+
+                if not pending:
+                    logger.info(f"[startup] book={book_id} has no pending chunks — marking complete")
+                    org.reference.collection("books").document(book_id).update(
+                        {"status": "review_editor"}
+                    )
+                    continue
+
+                logger.info(
+                    f"[startup] Auto-resuming stuck book={book_id} org={org_id} "
+                    f"({len(pending)} pending chunks)"
+                )
+                asyncio.create_task(
+                    asyncio.to_thread(process_book_background, org_id, book_id, author_id)
+                )
+    except Exception as exc:
+        logger.error(f"[startup] Error during stuck-book scan: {exc}", exc_info=True)
+
+
+@asynccontextmanager
+async def lifespan(app):
+    # Startup
+    asyncio.create_task(_resume_stuck_books())
+    yield
+    # Shutdown — nothing special needed
+
+
 app = FastAPI(
     title="CalíopeBot AI Orchestrator",
     version="2.0.0",
     description="Multi-agent editorial correction system with RAG and observability",
+    lifespan=lifespan,
 )
 
 # Middleware
@@ -272,6 +323,7 @@ app.add_middleware(RequestTimingMiddleware)
 
 # Metrics endpoint
 app.add_route("/metrics", metrics_endpoint)
+
 
 # ==========================================
 # MODELS
@@ -822,16 +874,12 @@ async def retry_book(request: RetryBookRequest, background_tasks: BackgroundTask
             detail="no_chunks:El manuscrito no tiene segmentos. Usa 'Reintentar' desde la lista de manuscritos para volver a subirlo."
         )
 
-    # ── Smart retry: only reset chunks that are still pending OR have no suggestions ──
-    # Chunks that were already successfully processed (status=processed AND suggestions exist)
-    # are preserved so the pipeline resumes from where it was killed (e.g. after a Cloud Run redeploy).
-    truly_done = [
-        c for c in all_chunks
-        if c.to_dict().get("status") == "processed"
-        and len(c.to_dict().get("suggestions") or []) > 0
-    ]
-    to_reset = [c for c in all_chunks if c not in truly_done]
-    done_count = len(truly_done)
+    # ── Smart retry: ONLY reset chunks still in 'pending' status ──────────
+    # Chunks with status="processed" are kept regardless of whether they have
+    # suggestions (empty suggestions = legitimately no errors found).
+    # This avoids re-processing the entire book when Cloud Run redeploys mid-analysis.
+    to_reset   = [c for c in all_chunks if c.to_dict().get("status") == "pending"]
+    done_count = total - len(to_reset)
 
     batch_size = 450
     for i in range(0, len(to_reset), batch_size):

@@ -88,7 +88,7 @@ export default function FeedbackWidget() {
         setSubject(SUBJECTS[0]);
         setFiles([]);
       }, 2500);
-    } catch (err) {
+    } catch {
       setStatus("error");
       setErrorMsg("No se pudo enviar. Inténtalo de nuevo.");
       setTimeout(() => setStatus("idle"), 3000);

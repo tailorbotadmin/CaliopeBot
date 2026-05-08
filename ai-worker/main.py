@@ -124,8 +124,8 @@ from app.services.agents import VoiceAnalyzerAgent, CorrectorAgent, RevisorAgent
 
 _vertex_key = settings.VERTEX_API_KEY or settings.GEMINI_API_KEY
 voice_analyzer = VoiceAnalyzerAgent(client=client, model=settings.LLM_MODEL, vertex_api_key=_vertex_key)
-corrector = CorrectorAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL, vertex_api_key=_vertex_key)
-revisor   = RevisorAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL, vertex_api_key=_vertex_key)
+corrector = CorrectorAgent(client=client, vector_store=vector_store, model="gemini-2.5-pro", vertex_api_key=_vertex_key)
+revisor   = RevisorAgent(client=client, vector_store=vector_store, model="gemini-2.5-pro", vertex_api_key=_vertex_key)
 arbiter   = ArbiterAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL, vertex_api_key=_vertex_key)
 coherence_agent = CoherenceAgent(client=client, vector_store=vector_store, model=settings.LLM_MODEL, vertex_api_key=_vertex_key)
 
@@ -247,7 +247,7 @@ def _bootstrap_rag_from_firestore():
     except Exception as e:
         logger.error(f"[RAG bootstrap] Failed: {e}", exc_info=True)
 
-_bootstrap_rag_from_firestore()
+# RAG bootstrap runs in the background after startup — see lifespan below.
 
 
 # ==========================================
@@ -299,16 +299,24 @@ async def _resume_stuck_books():
 async def lifespan(app):
     # Startup — all tasks run as background jobs so the server binds to PORT immediately.
     asyncio.create_task(_resume_stuck_books())
-    # Pre-warm LanguageTool connections in background (non-blocking)
-    async def _prewarm_lt():
-        await asyncio.sleep(10)  # wait for LT service to be ready
+    # Bootstrap RAG from Firestore in background (ChromaDB + sentence-transformers download
+    # happens here, not during module import, so startup is non-blocking)
+    async def _background_rag_and_lt():
+        await asyncio.sleep(5)  # let Firebase + Gemini init settle
+        try:
+            await asyncio.to_thread(_bootstrap_rag_from_firestore)
+            logger.info("[startup] RAG bootstrap complete")
+        except Exception as e:
+            logger.warning(f"[startup] RAG bootstrap failed (non-fatal): {e}")
+        # Pre-warm LanguageTool connections after RAG
+        await asyncio.sleep(5)
         try:
             await asyncio.to_thread(get_lt_tool, "es-ES")
             await asyncio.to_thread(get_lt_tool, "ca")
             logger.info("[startup] LanguageTool pre-warm complete")
         except Exception as e:
             logger.warning(f"[startup] LanguageTool pre-warm failed (non-fatal): {e}")
-    asyncio.create_task(_prewarm_lt())
+    asyncio.create_task(_background_rag_and_lt())
     yield
     # Shutdown — nothing special needed
 

@@ -1,0 +1,14 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+tests/
+chroma_data/
+service-account.json
+.env
+*.env
+*.log
+.git/
+scripts/

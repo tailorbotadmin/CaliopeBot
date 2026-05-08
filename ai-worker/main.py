@@ -21,7 +21,7 @@ from typing import List, Dict, Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import language_tool_python
+
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
@@ -178,9 +178,8 @@ def get_lt_tool(lang: str = "es-ES"):
         _lt_tools[lang] = mock
         return mock
 
-# Pre-warm the default languages at startup
-tool = get_lt_tool("es-ES")   # Spanish (RAE)
-_     = get_lt_tool("ca")     # Catalan (IEC) — pre-warmed so first book doesn't wait
+# LT tools are initialized lazily on first use (see get_lt_tool below).
+# Pre-warming happens non-blocking in the lifespan startup event.
 
 # Language configs: maps language code to normative body label
 LANG_META = {
@@ -298,8 +297,18 @@ async def _resume_stuck_books():
 
 @asynccontextmanager
 async def lifespan(app):
-    # Startup
+    # Startup — all tasks run as background jobs so the server binds to PORT immediately.
     asyncio.create_task(_resume_stuck_books())
+    # Pre-warm LanguageTool connections in background (non-blocking)
+    async def _prewarm_lt():
+        await asyncio.sleep(10)  # wait for LT service to be ready
+        try:
+            await asyncio.to_thread(get_lt_tool, "es-ES")
+            await asyncio.to_thread(get_lt_tool, "ca")
+            logger.info("[startup] LanguageTool pre-warm complete")
+        except Exception as e:
+            logger.warning(f"[startup] LanguageTool pre-warm failed (non-fatal): {e}")
+    asyncio.create_task(_prewarm_lt())
     yield
     # Shutdown — nothing special needed
 

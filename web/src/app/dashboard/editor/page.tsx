@@ -401,6 +401,18 @@ export default function EditorPage() {
     return map;
   }, [chunks]);
 
+  // ── Identical corrections: group pending suggestions by originalText||correctedText ─
+  const identicalGroups = useMemo(() => {
+    const map = new Map<string, string[]>();
+    allSuggestions.forEach(s => {
+      if (s.status !== "pending") return;
+      const key = `${s.originalText}||${s.correctedText}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(s.id);
+    });
+    return map;
+  }, [allSuggestions]);
+
   // ── Page numbers: use stored chunk.page when available, else estimate by word count ──
   const chunkPageNumbers = useMemo(() => {
     const map: Record<string, number> = {};
@@ -524,6 +536,14 @@ export default function EditorPage() {
   const handleReject = async (id: string) => {
     await updateSuggestionInChunk(id, { status: "rejected" });
     advanceToNextPending(id);
+  };
+
+  // ── Batch-accept all pending suggestions with the same original→corrected pair ──
+  const handleAcceptAll = async (originalText: string, correctedText: string, currentId: string) => {
+    const key = `${originalText}||${correctedText}`;
+    const ids = identicalGroups.get(key) ?? [];
+    await Promise.all(ids.map(id => updateSuggestionInChunk(id, { status: "accepted" })));
+    advanceToNextPending(currentId);
   };
 
   const handleSaveEdit = async (id: string) => {
@@ -665,6 +685,82 @@ export default function EditorPage() {
         {/* Expanded detail */}
         {isSelected && (
           <div style={{ borderTop: "1px solid var(--border-color)", padding: "0.75rem 0.875rem", backgroundColor: "var(--bg-surface)" }}>
+
+            {/* ── Identical corrections banner ── */}
+            {(() => {
+              const key = `${sugg.originalText}||${sugg.correctedText}`;
+              const group = identicalGroups.get(key) ?? [];
+              const otherCount = group.filter(id => id !== sugg.id).length;
+              if (otherCount === 0) return null;
+              return (
+                <div style={{
+                  backgroundColor: "rgba(245,158,11,0.08)",
+                  border: "1px solid rgba(245,158,11,0.3)",
+                  borderRadius: "var(--radius-sm)",
+                  padding: "0.45rem 0.65rem",
+                  marginBottom: "0.75rem",
+                  display: "flex", alignItems: "center", gap: "0.5rem",
+                  fontSize: "0.72rem",
+                }}>
+                  <span style={{ flex: 1, color: "#92400e", lineHeight: 1.4 }}>
+                    ⚡ Esta corrección aparece <strong>{otherCount + 1} veces</strong> en el documento
+                  </span>
+                  {canManage() && sugg.status === "pending" && (
+                    <button
+                      onClick={() => handleAcceptAll(sugg.originalText, sugg.correctedText, sugg.id)}
+                      style={{
+                        padding: "0.2rem 0.55rem",
+                        borderRadius: "var(--radius-sm)",
+                        border: "1px solid rgba(245,158,11,0.5)",
+                        backgroundColor: "rgba(245,158,11,0.18)",
+                        color: "#92400e",
+                        fontSize: "0.68rem", fontWeight: 700,
+                        cursor: "pointer", whiteSpace: "nowrap",
+                        flexShrink: 0,
+                      }}
+                    >
+                      ✓ Aceptar todas ({otherCount + 1})
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* ── Full-text correction preview ── */}
+            <div style={{
+              backgroundColor: "var(--bg-color)",
+              border: "1px solid var(--border-color)",
+              borderRadius: "var(--radius-sm)",
+              padding: "0.6rem 0.75rem",
+              marginBottom: "0.75rem",
+              maxHeight: "150px", overflowY: "auto",
+            }}>
+              <div style={{ marginBottom: "0.5rem" }}>
+                <span style={{ fontSize: "0.58rem", fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: "0.2rem" }}>Original</span>
+                <span style={{
+                  fontFamily: "monospace", fontSize: "0.8rem",
+                  textDecoration: "line-through", color: STATUS_COLOR.pending.text,
+                  backgroundColor: "rgba(239,68,68,0.08)", padding: "0.15rem 0.35rem",
+                  borderRadius: "3px", wordBreak: "break-word", lineHeight: 1.6,
+                  display: "inline",
+                }}>
+                  {sugg.originalText}
+                </span>
+              </div>
+              <div>
+                <span style={{ fontSize: "0.58rem", fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: "0.2rem" }}>Propuesta</span>
+                <span style={{
+                  fontFamily: "monospace", fontSize: "0.8rem",
+                  color: STATUS_COLOR.accepted.text,
+                  backgroundColor: "rgba(16,185,129,0.08)", padding: "0.15rem 0.35rem",
+                  borderRadius: "3px", wordBreak: "break-word", lineHeight: 1.6,
+                  display: "inline",
+                }}>
+                  {sugg.correctedText}
+                </span>
+              </div>
+            </div>
+
             <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontStyle: "italic", marginBottom: "0.75rem", lineHeight: 1.5 }}>
               {sugg.justification}
             </p>

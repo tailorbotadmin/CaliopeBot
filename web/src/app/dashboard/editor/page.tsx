@@ -721,6 +721,27 @@ export default function EditorPage() {
                   ✕ Rechazar
                 </button>
               </div>
+            ) : canManage() && sugg.status !== "pending" ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.4rem", fontSize: "0.78rem" }}>
+                <span style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+                  {sugg.status === "accepted"
+                    ? <><CheckCircle2 size={13} style={{ color: STATUS_COLOR.accepted.text }} /><span style={{ color: STATUS_COLOR.accepted.text }}>Aceptada</span></>
+                    : sugg.status === "rejected"
+                    ? <><XCircle size={13} style={{ color: STATUS_COLOR.rejected.text }} /><span style={{ color: STATUS_COLOR.rejected.text }}>Rechazada</span></>
+                    : <span style={{ color: STATUS_COLOR.edited.text }}>✎ Editada — pendiente de aprobación</span>}
+                </span>
+                <button
+                  onClick={() => updateSuggestionInChunk(sugg.id, { status: "pending", correctedText: sugg.correctedText })}
+                  title="Volver a pendiente para cambiar la decisión"
+                  style={{
+                    padding: "0.2rem 0.5rem", borderRadius: "var(--radius-sm)",
+                    border: "1px solid var(--border-color)", backgroundColor: "transparent",
+                    color: "var(--text-muted)", cursor: "pointer", fontSize: "0.7rem",
+                    fontWeight: 600, transition: "all 0.15s",
+                  }}>
+                  ↩ Revertir
+                </button>
+              </div>
             ) : sugg.status !== "pending" ? (
               <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.78rem" }}>
                 {sugg.status === "accepted"

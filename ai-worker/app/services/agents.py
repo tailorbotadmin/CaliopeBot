@@ -375,6 +375,12 @@ PROHIBIDO:
 ✗ Cambiar frases que no tienen error objetivo
 ✗ Proponer originalText que no aparezca literalmente en el texto
 ✗ Poner en originalText más contexto del estrictamente necesario (nunca frases enteras)
+✗ PUNTUACIÓN DOBLE: Antes de proponer añadir una coma, punto, punto y coma u otro signo al FINAL
+  de correctedText, comprueba SIEMPRE el carácter que sigue al originalText en el texto completo.
+  Si ya hay un signo de puntuación inmediatamente después (coma, punto y coma, punto, dos puntos,
+  paréntesis de cierre, raya, etc.), NO propongas añadir más puntuación — resultaría en doble signo.
+  Ejemplo PROHIBIDO: originalText="santas" correctedText="santas," cuando en el texto sigue "santas; solo que"
+  Ejemplo PROHIBIDO: originalText="solo que" correctedText="solo que," cuando el texto dice "solo que, al revés"
 
 Si no hay correcciones necesarias, devuelve [].
 Devuelve SOLO el array JSON."""
@@ -489,8 +495,23 @@ class RevisorAgent(BaseAgent):
             f"3. Si la justificacion del Corrector contiene una afirmacion gramatical incorrecta"
             f" (ej: dice 'menguan es singular' cuando menguan es 3a persona del plural), la"
             f" correccion debe ser RECHAZADA aunque la forma propuesta parezca plausible.\n"
-            f"4. No apruebes cambios de tiempo verbal (presente→imperfecto, etc.) a menos que el"
+            f"4. No apruebes cambios de tiempo verbal (presente\u2192imperfecto, etc.) a menos que el"
             f" error de tiempo sea inequivoco e independiente del estilo narrativo del autor.\n"
+            f"\n"
+            f"COHERENCIA INTERNA OBLIGATORIA:\n"
+            f"Tu decision debe ser COHERENTE con tu razon. Esto es innegociable:\n"
+            f"- Si tu razon afirma que la correccion es 'innecesaria', 'empobrece el texto',"
+            f" 'altera la voz del autor', 'es incorrecta' o similar → decision DEBE SER 'rechazada'.\n"
+            f"- NUNCA escribas 'innecesaria' o 'incorrecta' en la razon y votes 'aprobada'."
+            f" Eso es una contradiccion inaceptable.\n"
+            f"\n"
+            f"VERIFICACION DE PUNTUACION DOBLE:\n"
+            f"Si correctedText anade un signo de puntuacion al final (coma, punto, punto y coma, etc.)"
+            f" comprueba si el texto ya tiene ese signo inmediatamente despues del originalText.\n"
+            f"- Si el texto dice '...santas; solo que...' y el Corrector propone 'santas,': RECHAZA"
+            f" (resultaria en 'santas,; solo que').\n"
+            f"- Si el texto dice '...solo que, al reves...' y el Corrector propone 'solo que,': RECHAZA"
+            f" (resultaria en 'solo que,, al reves').\n"
             f"\n"
             f"Devuelve SOLO el array JSON con una entrada por correccion."
         )

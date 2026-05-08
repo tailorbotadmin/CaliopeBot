@@ -474,7 +474,7 @@ export default function SettingsPage() {
         <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--text-main)", margin: 0 }}>Gestión de Organizaciones</h2>
         <span style={{ fontSize: "0.7rem", fontWeight: 700, padding: "0.15rem 0.5rem", borderRadius: "99px", backgroundColor: "rgba(168,85,247,0.12)", color: "#a855f7" }}>SUPERADMIN</span>
       </div>
-      <p style={{ color: "var(--text-muted)", marginBottom: "1.75rem" }}>Administra todas las organizaciones registradas en CalíopeBot.</p>
+      <p style={{ color: "var(--text-muted)", marginBottom: "1.75rem" }}>Administra todas las organizaciones registradas en Stilus.</p>
 
       <div className="card-static" style={{ padding: 0, overflow: "hidden", marginBottom: "2rem" }}>
         <div style={{ padding: "1.25rem 1.75rem", borderBottom: "1px solid var(--border-color)", display: "flex", alignItems: "center", gap: "0.625rem" }}>

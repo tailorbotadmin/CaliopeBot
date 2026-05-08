@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { Building2, Users, UserPlus, ChevronDown, ChevronUp, Loader2, X, Shield, Mail } from "lucide-react";
-import { getOrganizations, createOrganization, getOrgUsers, Organization, UserProfile, Role } from "@/lib/firestore";
+import { getOrganizations, createOrganization, getOrgUsers, Organization, UserProfile, Role, OrgType } from "@/lib/firestore";
 import { useRouter } from "next/navigation";
 
 const ROLES: Role[] = ["Responsable_Editorial", "Editor", "Autor"];
@@ -33,6 +33,7 @@ export default function OrganizationsPage() {
   // Modals
   const [isNewOrgModalOpen, setIsNewOrgModalOpen] = useState(false);
   const [newOrgName, setNewOrgName] = useState("");
+  const [newOrgType, setNewOrgType] = useState<OrgType>("single_level");
   const [isSubmittingOrg, setIsSubmittingOrg] = useState(false);
 
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
@@ -95,10 +96,11 @@ export default function OrganizationsPage() {
     if (!newOrgName.trim()) { setError("El nombre es obligatorio."); return; }
     setIsSubmittingOrg(true);
     try {
-      await createOrganization(newOrgName.trim());
+      await createOrganization(newOrgName.trim(), newOrgType);
       await fetchOrganizations();
       setIsNewOrgModalOpen(false);
       setNewOrgName("");
+      setNewOrgType("single_level");
     } catch (err) {
       setError("Error al crear: " + (err instanceof Error ? err.message : String(err)));
     } finally {
@@ -243,6 +245,17 @@ export default function OrganizationsPage() {
                     <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontFamily: "monospace" }}>ID: {org.id.slice(0, 14)}…</p>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                    {/* Org type badge */}
+                    <span style={{
+                      fontSize: "0.7rem", fontWeight: 700, padding: "0.2rem 0.625rem",
+                      borderRadius: "99px",
+                      backgroundColor: (org.org_type ?? "single_level") === "dual_level"
+                        ? "rgba(99,102,241,0.12)" : "rgba(16,185,129,0.1)",
+                      color: (org.org_type ?? "single_level") === "dual_level"
+                        ? "#6366f1" : "var(--success)",
+                    }}>
+                      {(org.org_type ?? "single_level") === "dual_level" ? "2 Niveles" : "1 Nivel"}
+                    </span>
                     <span style={{ display: "flex", alignItems: "center", gap: "0.375rem", fontSize: "0.8125rem", color: "var(--text-muted)" }}>
                       <Users size={14} /> Equipo
                     </span>
@@ -341,9 +354,35 @@ export default function OrganizationsPage() {
               Se creará un nuevo <strong>Tenant RAG</strong> aislado. Todos los libros, estilos y diccionarios quedarán exclusivamente asociados a este entorno.
             </p>
             <form onSubmit={handleCreateOrganization}>
-              <div style={{ marginBottom: "1.75rem" }}>
+              <div style={{ marginBottom: "1.25rem" }}>
                 <label style={{ display: "block", marginBottom: "0.375rem", fontSize: "0.875rem", fontWeight: 600, color: "var(--text-main)" }}>Nombre de la Editorial / Área</label>
                 <input type="text" className="input" value={newOrgName} onChange={(e) => setNewOrgName(e.target.value)} placeholder="Ej. Anagrama, Grupo Planeta..." autoFocus required />
+              </div>
+              {/* Org type selector */}
+              <div style={{ marginBottom: "1.75rem" }}>
+                <label style={{ display: "block", marginBottom: "0.625rem", fontSize: "0.875rem", fontWeight: 600, color: "var(--text-main)" }}>Tipo de organización</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+                  {([
+                    { value: "single_level", label: "1 Nivel", desc: "Editor → Autor", color: "var(--success)", bg: "rgba(16,185,129,0.08)" },
+                    { value: "dual_level",   label: "2 Niveles", desc: "Editor → Responsable → Autor", color: "#6366f1", bg: "rgba(99,102,241,0.08)" },
+                  ] as { value: OrgType; label: string; desc: string; color: string; bg: string }[]).map(opt => (
+                    <div
+                      key={opt.value}
+                      onClick={() => setNewOrgType(opt.value)}
+                      style={{
+                        padding: "0.875rem 1rem", borderRadius: "var(--radius-md)", cursor: "pointer",
+                        border: `2px solid ${newOrgType === opt.value ? opt.color : "var(--border-color)"}`,
+                        backgroundColor: newOrgType === opt.value ? opt.bg : "transparent",
+                        transition: "all 0.15s",
+                      }}
+                    >
+                      <div style={{ fontWeight: 700, fontSize: "0.875rem", color: newOrgType === opt.value ? opt.color : "var(--text-main)", marginBottom: "0.2rem" }}>
+                        {opt.label}
+                      </div>
+                      <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>{opt.desc}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
               {error && <div style={{ color: "var(--danger)", fontSize: "0.875rem", marginBottom: "1rem" }}>{error}</div>}
               <div style={{ display: "flex", gap: "0.75rem" }}>

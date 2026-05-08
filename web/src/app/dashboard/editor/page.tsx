@@ -8,7 +8,7 @@ import {
   doc, setDoc, addDoc, serverTimestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { updateBookStatus, notifyResponsables } from "@/lib/firestore";
+import { updateBookStatus, notifyResponsables, getOrganization, OrgType } from "@/lib/firestore";
 import { Document, Packer, Paragraph, TextRun } from "docx";
 import { saveAs } from "file-saver";
 import {
@@ -105,25 +105,49 @@ type ChapterGroup = { id: string; title: string; level: 1 | 2; chunkIds: Set<str
 type Segment = { text: string; type: "plain" } | { text: string; type: "correction"; sugg: Suggestion; globalIdx: number };
 
 function buildSegments(text: string, suggestions: Suggestion[], globalOffset: number): Segment[] {
-  let segments: Segment[] = [{ text, type: "plain" }];
+  // ── Step 1: assign each suggestion the first non-overlapping position ──────
+  // Suggestions are matched in the order they appear in the array. Each one
+  // claims the first occurrence of its originalText that doesn't overlap with
+  // any already-claimed range.  Suggestions with no available position are
+  // omitted from the inline markup (but still visible in the corrections panel).
+  interface Placed { sugg: Suggestion; globalIdx: number; start: number; end: number }
+  const placed: Placed[] = [];
+  const claimed: Array<[number, number]> = [];  // [start, end) ranges already taken
+
   suggestions.forEach((sugg, localIdx) => {
-    const globalIdx = globalOffset + localIdx;
-    const next: Segment[] = [];
-    for (const seg of segments) {
-      if (seg.type !== "plain") { next.push(seg); continue; }
-      const pos = seg.text.indexOf(sugg.originalText);
-      if (pos === -1) { next.push(seg); continue; }
-      if (pos > 0) next.push({ text: seg.text.slice(0, pos), type: "plain" });
-      // For accepted/edited: display the corrected text inline; original is preserved in Firestore
-      const displayText = (sugg.status === "accepted" || sugg.status === "edited")
-        ? sugg.correctedText
-        : sugg.originalText;
-      next.push({ text: displayText, type: "correction", sugg, globalIdx });
-      const after = seg.text.slice(pos + sugg.originalText.length);
-      if (after) next.push({ text: after, type: "plain" });
+    const needle = sugg.originalText;
+    if (!needle) return;
+    let searchFrom = 0;
+    while (searchFrom <= text.length - needle.length) {
+      const pos = text.indexOf(needle, searchFrom);
+      if (pos === -1) break;
+      const end = pos + needle.length;
+      const overlaps = claimed.some(([s, e]) => pos < e && end > s);
+      if (!overlaps) {
+        placed.push({ sugg, globalIdx: globalOffset + localIdx, start: pos, end });
+        claimed.push([pos, end]);
+        break;
+      }
+      searchFrom = pos + 1;
     }
-    segments = next;
   });
+
+  // ── Step 2: sort placements by position and build segment list ─────────────
+  placed.sort((a, b) => a.start - b.start);
+
+  const segments: Segment[] = [];
+  let cursor = 0;
+  for (const { sugg, globalIdx, start, end } of placed) {
+    if (start > cursor) segments.push({ text: text.slice(cursor, start), type: "plain" });
+    const displayText = (sugg.status === "accepted" || sugg.status === "edited")
+      ? sugg.correctedText
+      : sugg.originalText;
+    segments.push({ text: displayText, type: "correction", sugg, globalIdx });
+    cursor = end;
+  }
+  if (cursor < text.length) segments.push({ text: text.slice(cursor), type: "plain" });
+  if (segments.length === 0) segments.push({ text, type: "plain" });
+
   return segments;
 }
 
@@ -193,6 +217,7 @@ export default function EditorPage() {
 
   const [chunks, setChunks] = useState<Chunk[]>([]);
   const [resolvedOrgId, setResolvedOrgId] = useState<string | null>(null);
+  const [orgType, setOrgType] = useState<OrgType>('single_level');
   const [bookStatus, setBookStatus] = useState<string>("processing");
   const [bookTitle, setBookTitle] = useState<string>("");
   const [processedCount, setProcessedCount] = useState(0);
@@ -245,6 +270,14 @@ export default function EditorPage() {
   }, [bookId, organizationId]);
 
   const effectiveOrgId = resolvedOrgId;
+
+  // ── Load org type ────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!effectiveOrgId) return;
+    getOrganization(effectiveOrgId).then(org => {
+      if (org) setOrgType(org.org_type ?? 'single_level');
+    }).catch(() => {});
+  }, [effectiveOrgId]);
 
   // ── Book listener ────────────────────────────────────────────────────
   useEffect(() => {
@@ -416,6 +449,19 @@ export default function EditorPage() {
     }, 120);
   }, [scrollToCorrection, allSuggestions, chapterGroups]);
 
+  // ── Auto-advance to the next pending suggestion after any action ────────
+  const advanceToNextPending = useCallback((currentId: string) => {
+    // Exclude currentId because its status update may not have propagated yet
+    const pending = allSuggestions.filter(s => s.status === "pending" && s.id !== currentId);
+    if (pending.length === 0) { setSelectedId(null); return; }
+    const currentIdx = allSuggestions.findIndex(s => s.id === currentId);
+    // Look forward from current position first, wrap-around if needed
+    const next =
+      allSuggestions.slice(currentIdx + 1).find(s => s.status === "pending" && s.id !== currentId)
+      ?? pending[0];
+    handleSelectCorrection(next.id);
+  }, [allSuggestions, handleSelectCorrection]);
+
   // ── Save suggestion change to Firestore ─────────────────────────────
   const saveSuggestion = async (chunkId: string, newSuggestions: Suggestion[]) => {
     if (!effectiveOrgId || !bookId) return;
@@ -472,12 +518,12 @@ export default function EditorPage() {
 
   const handleAccept = async (id: string) => {
     await updateSuggestionInChunk(id, { status: "accepted" });
-    setSelectedId(null);
+    advanceToNextPending(id);
   };
 
   const handleReject = async (id: string) => {
     await updateSuggestionInChunk(id, { status: "rejected" });
-    setSelectedId(null);
+    advanceToNextPending(id);
   };
 
   const handleSaveEdit = async (id: string) => {
@@ -488,15 +534,25 @@ export default function EditorPage() {
       editorJustification: editJustification.trim() || undefined,
     });
     setEditingId(null);
-    setSelectedId(null);
+    advanceToNextPending(id);
   };
 
   // ── Next phase ──────────────────────────────────────────────────────
   const handleNextPhase = async () => {
     if (!bookId || !effectiveOrgId) return;
-    let nextStatus = "review_author";
-    if (role === "Autor") nextStatus = "review_responsable";
-    else if (role === "Responsable_Editorial" || role === "SuperAdmin") nextStatus = "approved";
+    let nextStatus: string;
+    if (role === 'Responsable_Editorial') {
+      // Supervisor approves → send to author
+      nextStatus = 'review_author';
+    } else if (role === 'SuperAdmin') {
+      nextStatus = 'approved';
+    } else if (role === 'Editor') {
+      // Route depends on org type
+      nextStatus = orgType === 'dual_level' ? 'review_responsable' : 'review_author';
+    } else {
+      // Autor or fallback
+      nextStatus = 'review_responsable';
+    }
     try {
       await updateBookStatus(effectiveOrgId, bookId, nextStatus);
       await notifyResponsables(effectiveOrgId, {
@@ -1020,29 +1076,38 @@ export default function EditorPage() {
                 <span style={{ color: STATUS_COLOR.rejected.text }}>{allSuggestions.filter(s => s.status === "rejected").length} ✕</span>
               </div>
             </div>
-            {/* Category filters */}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.25rem" }}>
-              {CATEGORIES.map(cat => {
-                const count = cat === "Todos"
-                  ? allSuggestions.length
-                  : allSuggestions.filter(s => s.category === cat).length;
-                if (cat !== "Todos" && count === 0) return null;
-                const isActive = categoryFilter === cat;
-                return (
-                  <button key={cat} onClick={() => setCategoryFilter(cat)}
-                    style={{
-                      padding: "0.2rem 0.6rem", borderRadius: "99px", border: "1px solid",
-                      borderColor: isActive ? "var(--primary)" : "var(--border-color)",
-                      backgroundColor: isActive ? "var(--primary)" : "transparent",
-                      color: isActive ? "#fff" : "var(--text-muted)",
-                      fontSize: "0.7rem", fontWeight: 600, cursor: "pointer",
-                      transition: "all 0.15s",
-                    }}>
-                    {cat}{count > 0 && cat !== "Todos" ? ` (${count})` : ""}
-                  </button>
-                );
-              })}
-            </div>
+            {/* Category filters — the chip of the selected correction's category gets a ring indicator */}
+            {(() => {
+              const selectedSugg = selectedId ? allSuggestions.find(s => s.id === selectedId) : null;
+              return (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.25rem" }}>
+                  {CATEGORIES.map(cat => {
+                    const count = cat === "Todos"
+                      ? allSuggestions.length
+                      : allSuggestions.filter(s => s.category === cat).length;
+                    if (cat !== "Todos" && count === 0) return null;
+                    const isActive = categoryFilter === cat;
+                    const isCatOfSelected = !!(selectedSugg && (selectedSugg.category ?? "Ortografía") === cat);
+                    return (
+                      <button key={cat} onClick={() => setCategoryFilter(cat)}
+                        title={isCatOfSelected ? `La corrección abierta pertenece a: ${cat}` : undefined}
+                        style={{
+                          padding: "0.2rem 0.6rem", borderRadius: "99px", border: "1px solid",
+                          borderColor: isActive ? "var(--primary)" : isCatOfSelected ? "var(--primary)" : "var(--border-color)",
+                          backgroundColor: isActive ? "var(--primary)" : "transparent",
+                          color: isActive ? "#fff" : isCatOfSelected ? "var(--primary)" : "var(--text-muted)",
+                          fontSize: "0.7rem", fontWeight: isCatOfSelected ? 800 : 600, cursor: "pointer",
+                          transition: "all 0.15s",
+                          boxShadow: isCatOfSelected && !isActive ? "0 0 0 2px var(--primary)" : "none",
+                        }}>
+                        {isCatOfSelected && !isActive && <span style={{ marginRight: "0.2rem" }}>●</span>}
+                        {cat}{count > 0 && cat !== "Todos" ? ` (${count})` : ""}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
 
           {/* Corrections list */}

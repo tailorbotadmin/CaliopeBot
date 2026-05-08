@@ -33,9 +33,12 @@ export interface UserProfile {
   createdAt: FirestoreDate;
 }
 
+export type OrgType = 'single_level' | 'dual_level';
+
 export interface Organization {
   id: string;
   name: string;
+  org_type: OrgType;
   createdAt: FirestoreDate;
 }
 
@@ -190,9 +193,10 @@ export async function updateUserRole(uid: string, role: Role) {
 // ORGANIZATIONS
 // ==========================================
 
-export async function createOrganization(name: string): Promise<string> {
+export async function createOrganization(name: string, org_type: OrgType = 'single_level'): Promise<string> {
   const orgRef = await addDoc(collection(db, 'organizations'), {
     name,
+    org_type,
     createdAt: serverTimestamp()
   });
   return orgRef.id;

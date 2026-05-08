@@ -276,7 +276,7 @@ class CorrectorAgent(BaseAgent):
         },
     }
 
-    def __init__(self, client, vector_store=None, model: str = "gemini-2.5-flash-lite", vertex_api_key: str = ""):
+    def __init__(self, client, vector_store=None, model: str = "gemini-2.5-pro", vertex_api_key: str = ""):
         super().__init__(client, model, name="corrector", vertex_api_key=vertex_api_key)
         self.vector_store = vector_store
 
@@ -326,7 +326,12 @@ Sé exhaustivo: un informe académico o técnico tiene errores ortotipográficos
 
 ════ TU MISIÓN ════
 Revisa el texto anterior EXHAUSTIVAMENTE buscando todos los tipos de error. Para cada error:
-- originalText: copia EXACTA del fragmento que debe cambiar (debe aparecer literalmente en el texto)
+- originalText: SOLO la palabra o expresión mínima que debe cambiar — nunca la frase completa ni el contexto circundante. Debe aparecer literalmente en el texto.
+  BIEN → originalText: "Fué"  (error de tilde en una sola palabra)
+  MAL  → originalText: "El niño Fué a la escuela ayer"  (frase completa innecesaria)
+  BIEN → originalText: "en relación a"  (expresión preposicional incorrecta)
+  MAL  → originalText: "El informe se elaboró en relación a los datos disponibles"  (frase completa)
+  La regla: incluye SOLO el texto que cambia en correctedText, nada más.
 - correctedText: la versión corregida
 - justification: explica qué regla RAE viola y por qué tu corrección es correcta
 - reglaAplicada: nombre o número de la regla editorial aplicada
@@ -369,6 +374,7 @@ PROHIBIDO:
 ✗ Reescribir el texto completo
 ✗ Cambiar frases que no tienen error objetivo
 ✗ Proponer originalText que no aparezca literalmente en el texto
+✗ Poner en originalText más contexto del estrictamente necesario (nunca frases enteras)
 
 Si no hay correcciones necesarias, devuelve [].
 Devuelve SOLO el array JSON."""
@@ -422,7 +428,7 @@ class RevisorAgent(BaseAgent):
         },
     }
 
-    def __init__(self, client, vector_store=None, model: str = "gemini-2.5-flash-lite", vertex_api_key: str = ""):
+    def __init__(self, client, vector_store=None, model: str = "gemini-2.5-pro", vertex_api_key: str = ""):
         super().__init__(client, model, name="revisor", vertex_api_key=vertex_api_key)
         self.vector_store = vector_store
 
@@ -472,6 +478,20 @@ class RevisorAgent(BaseAgent):
             f"CORRECCIONES A REVISAR:\n{corrections_json}\n\n"
             f"REGLAS EDITORIALES:\n{rag_context}\n\n"
             f"MISION: Para cada correccion (usa su campo 'id' como correctionId), decide: {decision_guide}\n"
+            f"\n"
+            f"VERIFICACION GRAMATICAL OBLIGATORIA:\n"
+            f"Antes de aprobar cualquier correccion que involucre concordancia verbal, conjugacion o"
+            f" numero gramatical, debes:\n"
+            f"1. Verificar TU MISMO si la forma original es realmente incorrecta segun la RAE."
+            f" No te fies de la justificacion del Corrector sin comprobarlo.\n"
+            f"2. Si el Corrector afirma que una forma verbal es 'singular' cuando podria ser plural"
+            f" (o viceversa), comprueba la conjugacion completa del verbo antes de decidir.\n"
+            f"3. Si la justificacion del Corrector contiene una afirmacion gramatical incorrecta"
+            f" (ej: dice 'menguan es singular' cuando menguan es 3a persona del plural), la"
+            f" correccion debe ser RECHAZADA aunque la forma propuesta parezca plausible.\n"
+            f"4. No apruebes cambios de tiempo verbal (presente→imperfecto, etc.) a menos que el"
+            f" error de tiempo sea inequivoco e independiente del estilo narrativo del autor.\n"
+            f"\n"
             f"Devuelve SOLO el array JSON con una entrada por correccion."
         )
 
@@ -649,7 +669,10 @@ PERFIL DEL TEXTO:
 Detecta todos los problemas editoriales en estas tres categorías (sáltate lo que esté bien).
 
 Para CADA problema, devuelve:
-- originalText: fragmento EXACTO (copia literal del texto) donde está el problema
+- originalText: SOLO el fragmento mínimo donde está el problema — la palabra, nombre o expresión concreta, nunca un párrafo entero.
+  BIEN → originalText: "Marta"  (nombre del personaje que cambia)
+  MAL  → originalText: "Marta caminó por el pasillo y abrió la puerta"  (frase innecesariamente larga)
+  Incluye solo lo que necesitas cambiar o marcar, nada más.
 - correctedText: corrección concreta, o "[REQUIERE REVISIÓN EDITORIAL]" si no es automático
 - justification: explicación clara del problema y su impacto en la calidad del libro
 - reglaAplicada: etiqueta del tipo de problema (coherencia-nombres, coherencia-fechas, fact-check, sensibilidad-legal, etc.)

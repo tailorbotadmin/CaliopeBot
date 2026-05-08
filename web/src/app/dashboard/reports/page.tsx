@@ -453,8 +453,8 @@ export default function ReportsPage() {
   const ms = msAnalytics;
 
   const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-    draft: { label: "Borrador", color: "var(--text-muted)" },
-    processing: { label: "Analizando", color: "#f59e0b" },
+    draft: { label: "En proceso", color: "#f59e0b" },
+    processing: { label: "En proceso", color: "#f59e0b" },
     review_editor: { label: "En revisión", color: "#6366f1" },
     review_author: { label: "Revisión autor", color: "#06b6d4" },
     approved: { label: "Aprobado", color: "#10b981" },
@@ -694,8 +694,8 @@ export default function ReportsPage() {
                       <tbody>
                         {editorBooks.map(b => {
                           const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-                            draft: { label: "Borrador", color: "var(--text-muted)" },
-                            processing: { label: "Analizando", color: "#f59e0b" },
+                            draft: { label: "En proceso", color: "#f59e0b" },
+                            processing: { label: "En proceso", color: "#f59e0b" },
                             review_editor: { label: "En revisión", color: "#6366f1" },
                             review_author: { label: "Rev. autor", color: "#06b6d4" },
                             approved: { label: "Aprobado", color: "#10b981" },

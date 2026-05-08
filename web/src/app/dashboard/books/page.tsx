@@ -41,8 +41,8 @@ const LANG_FLAG: Record<string, { flag: string; label: string }> = {
 };
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  draft:               { label: "Borrador",           color: "var(--text-muted)",  bg: "var(--border-color)" },
-  processing:          { label: "Analizando…",         color: "#f59e0b",            bg: "rgba(245,158,11,0.12)" },
+  draft:               { label: "En proceso",          color: "#f59e0b",            bg: "rgba(245,158,11,0.12)" },
+  processing:          { label: "En proceso",            color: "#f59e0b",            bg: "rgba(245,158,11,0.12)" },
   review_editor:       { label: "En edición",         color: "#6366f1",            bg: "rgba(99,102,241,0.12)" },
   ready:               { label: "En edición",         color: "#6366f1",            bg: "rgba(99,102,241,0.12)" },
   review_author:       { label: "Revisión Autor",      color: "#06b6d4",            bg: "rgba(6,182,212,0.12)" },
@@ -768,7 +768,7 @@ export default function BooksPage() {
                     padding: "0.2rem 0.5rem", borderRadius: "99px",
                     backgroundColor: sc.bg, color: sc.color,
                   }}>
-                    {book.status === "processing" && <Loader2 size={9} style={{ animation: "spin 1s linear infinite" }} />}
+                    {(book.status === "processing" || book.status === "draft") && <Loader2 size={9} style={{ animation: "spin 1s linear infinite" }} />}
                     {book.status === "error" && <AlertCircle size={9} />}
                     {sc.label}
                   </span>
@@ -999,8 +999,8 @@ export default function BooksPage() {
                     alignItems: "center",
                     height: "110px",
                     borderStyle: "dashed",
-                    borderColor: selectedFile ? "var(--primary)" : "var(--border-color)",
-                    backgroundColor: selectedFile ? "rgba(233, 68, 90, 0.05)" : "var(--bg-color)",
+                    borderColor: selectedFile ? "#10b981" : "var(--border-color)",
+                    backgroundColor: selectedFile ? "rgba(16,185,129,0.07)" : "var(--bg-color)",
                   }}
                 >
                   <input
@@ -1012,7 +1012,7 @@ export default function BooksPage() {
                   />
                   {selectedFile ? (
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.375rem" }}>
-                      <CheckCircle2 style={{ color: "var(--primary)" }} />
+                      <CheckCircle2 style={{ color: "#10b981" }} />
                       <span style={{ color: "var(--text-main)", fontSize: "0.875rem", fontWeight: 600 }}>{selectedFile.name}</span>
                       <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>
                         {(selectedFile.size / 1024 / 1024).toFixed(2)} MB

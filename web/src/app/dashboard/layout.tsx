@@ -146,7 +146,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div className="sidebar-brand">
             <h2 style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
               <FileCheck size={22} strokeWidth={2} />
-              CalíopeBot
+              Stilus
             </h2>
             <span className="role-tag" style={impersonated ? { backgroundColor: "rgba(245,158,11,0.18)", color: "#f59e0b" } : {}}>
               {ROLE_LABELS[effectiveRole ?? ""] ?? effectiveRole ?? "Cargando..."}

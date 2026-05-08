@@ -28,8 +28,8 @@ const EDITORIAL_STATE = (status: string): { label: string; color: string } => {
 };
 
 const STATUS_LABEL: Record<string, { label: string; color: string }> = {
-  draft:              { label: "Borrador",         color: "var(--text-muted)" },
-  processing:         { label: "Procesando IA",    color: "#f59e0b" },
+  draft:              { label: "En proceso",      color: "#f59e0b" },
+  processing:         { label: "En proceso",      color: "#f59e0b" },
   review_editor:      { label: "Revisión Editor",  color: "#6366f1" },
   ready:              { label: "Revisión Editor",  color: "#6366f1" },
   review_author:      { label: "Revisión Autor",   color: "#06b6d4" },
@@ -189,7 +189,7 @@ export default function DashboardPage() {
               <Sparkles size={20} strokeWidth={1.75} style={{ color: "var(--primary)" }} />
             </div>
             <div>
-              <h2 style={{ fontSize: "1.0625rem", fontWeight: 700, color: "var(--text-main)" }}>Primeros pasos en CalíopeBot</h2>
+              <h2 style={{ fontSize: "1.0625rem", fontWeight: 700, color: "var(--text-main)" }}>Primeros pasos en Stilus</h2>
               <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>Sigue estos pasos para poner en marcha tu flujo editorial.</p>
             </div>
           </div>

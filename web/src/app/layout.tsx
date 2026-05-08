@@ -5,7 +5,7 @@ import "./globals.css";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "CalíopeBot | AI Editorial Corrector",
+  title: "Stilus | AI Editorial Corrector",
   description: "Advanced AI-powered editorial correction platform",
 };
 

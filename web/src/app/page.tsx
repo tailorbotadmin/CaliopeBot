@@ -61,7 +61,7 @@ export default function Home() {
         <div className="brand-icon">
           <FileCheck size={28} strokeWidth={1.75} color="white" />
         </div>
-        <h1>CalíopeBot</h1>
+        <h1>Stilus</h1>
         <p>
           Plataforma de corrección editorial potenciada por IA. Sube tus textos, recibe propuestas inteligentes y aprueba el resultado final.
         </p>
